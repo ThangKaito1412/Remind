@@ -15,6 +15,29 @@ import kotlinx.coroutines.withContext
 class AlarmReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val action = intent.action
+        
+        // Handle Boot Completed / Package Replaced / Quickboot
+        if (action == Intent.ACTION_BOOT_COMPLETED || 
+            action == "android.intent.action.QUICKBOOT_POWERON" || 
+            action == Intent.ACTION_MY_PACKAGE_REPLACED
+        ) {
+            Log.d("AlarmReceiver", "Device rebooted or app updated. Rescheduling all active alarms.")
+            val database = WorkoutDatabase.getDatabase(context)
+            val dao = database.workoutDao()
+            CoroutineScope(Dispatchers.IO).launch {
+                try {
+                    val activeSchedules = dao.getAllSchedulesList().filter { it.isActive }
+                    for (schedule in activeSchedules) {
+                        AlarmScheduler.scheduleWorkoutAlarm(context, schedule)
+                    }
+                    Log.d("AlarmReceiver", "Rescheduled ${activeSchedules.size} alarms successfully after boot.")
+                } catch (e: Exception) {
+                    Log.e("AlarmReceiver", "Error rescheduling alarms on boot", e)
+                }
+            }
+            return
+        }
+
         val categoryId = intent.getLongExtra("CATEGORY_ID", -1L)
         val categoryName = intent.getStringExtra("CATEGORY_NAME") ?: "Luyện Tập Hằng Ngày"
         val scheduleLabel = intent.getStringExtra("SCHEDULE_LABEL") ?: "Lịch Luyện Tập"

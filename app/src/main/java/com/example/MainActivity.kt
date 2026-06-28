@@ -14,6 +14,8 @@ import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import android.content.Context
+import androidx.compose.runtime.*
 import com.example.ui.FitMinderApp
 import com.example.ui.theme.MyApplicationTheme
 import com.example.ui.viewmodel.WorkoutViewModel
@@ -36,12 +38,32 @@ class MainActivity : ComponentActivity() {
     }
 
     setContent {
-      MyApplicationTheme {
+      val prefs = remember { getSharedPreferences("fitminder_prefs", Context.MODE_PRIVATE) }
+      var isDarkTheme by remember { mutableStateOf(prefs.getBoolean("is_dark_theme", false)) }
+      var backgroundImagePath by remember { mutableStateOf(prefs.getString("custom_background_path", null)) }
+
+      MyApplicationTheme(darkTheme = isDarkTheme) {
         Surface(
           modifier = Modifier.fillMaxSize(),
           color = MaterialTheme.colorScheme.background
         ) {
-          FitMinderApp(viewModel = viewModel)
+          FitMinderApp(
+            viewModel = viewModel,
+            isDarkTheme = isDarkTheme,
+            onDarkThemeChanged = { newValue ->
+              isDarkTheme = newValue
+              prefs.edit().putBoolean("is_dark_theme", newValue).apply()
+            },
+            backgroundImagePath = backgroundImagePath,
+            onBackgroundImageChanged = { newValue ->
+              backgroundImagePath = newValue
+              if (newValue == null) {
+                prefs.edit().remove("custom_background_path").apply()
+              } else {
+                prefs.edit().putString("custom_background_path", newValue).apply()
+              }
+            }
+          )
         }
       }
     }

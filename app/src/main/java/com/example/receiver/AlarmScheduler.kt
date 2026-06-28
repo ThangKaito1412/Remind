@@ -48,7 +48,10 @@ object AlarmScheduler {
         }
 
         try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                val clockInfo = AlarmManager.AlarmClockInfo(calendar.timeInMillis, pendingIntent)
+                alarmManager.setAlarmClock(clockInfo, pendingIntent)
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                 alarmManager.setExactAndAllowWhileIdle(
                     AlarmManager.RTC_WAKEUP,
                     calendar.timeInMillis,
@@ -61,7 +64,7 @@ object AlarmScheduler {
                     pendingIntent
                 )
             }
-            Log.d("AlarmScheduler", "Successfully scheduled alarm for ${schedule.categoryName} at ${schedule.hour}:${schedule.minute} (timestamp: ${calendar.timeInMillis})")
+            Log.d("AlarmScheduler", "Successfully scheduled alarm clock for ${schedule.categoryName} at ${schedule.hour}:${schedule.minute} (timestamp: ${calendar.timeInMillis})")
         } catch (e: SecurityException) {
             // Fallback to non-exact alarm if exact alert permission is revoked
             alarmManager.set(
@@ -113,7 +116,10 @@ object AlarmScheduler {
         val triggerTime = System.currentTimeMillis() + (minutesFromNow * 60L * 1000L)
 
         try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                val clockInfo = AlarmManager.AlarmClockInfo(triggerTime, pendingIntent)
+                alarmManager.setAlarmClock(clockInfo, pendingIntent)
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                 alarmManager.setExactAndAllowWhileIdle(
                     AlarmManager.RTC_WAKEUP,
                     triggerTime,
@@ -126,7 +132,7 @@ object AlarmScheduler {
                     pendingIntent
                 )
             }
-            Log.d("AlarmScheduler", "Scheduled snooze alarm for $categoryName in $minutesFromNow minutes")
+            Log.d("AlarmScheduler", "Scheduled snooze alarm clock for $categoryName in $minutesFromNow minutes")
         } catch (e: Exception) {
             alarmManager.set(
                 AlarmManager.RTC_WAKEUP,

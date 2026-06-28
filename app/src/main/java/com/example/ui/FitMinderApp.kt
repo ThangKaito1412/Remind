@@ -55,9 +55,32 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
 import kotlinx.coroutines.launch
+import android.net.Uri
+import android.graphics.BitmapFactory
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import java.io.File
+import java.io.FileOutputStream
 
 // --- Spaced Repetition Helpers & Constants ---
 val repetitionIntervals = listOf(1, 3, 7, 15, 30)
+
+fun saveChosenBackgroundImage(context: Context, uri: Uri): String? {
+    return try {
+        val inputStream = context.contentResolver.openInputStream(uri) ?: return null
+        val file = File(context.filesDir, "custom_background.png")
+        val outputStream = FileOutputStream(file)
+        inputStream.use { input ->
+            outputStream.use { output ->
+                input.copyTo(output)
+            }
+        }
+        file.absolutePath
+    } catch (e: Exception) {
+        e.printStackTrace()
+        null
+    }
+}
 
 fun getIntervalDaysForCategory(topic: CategoryEntity, index: Int): Int {
     return when (index) {
@@ -189,7 +212,13 @@ fun serializeReviewNotes(notes: List<String>): String {
 
 @OptIn(ExperimentalAnimationApi::class)
 @Composable
-fun FitMinderApp(viewModel: WorkoutViewModel) {
+fun FitMinderApp(
+    viewModel: WorkoutViewModel,
+    isDarkTheme: Boolean,
+    onDarkThemeChanged: (Boolean) -> Unit,
+    backgroundImagePath: String?,
+    onBackgroundImageChanged: (String?) -> Unit
+) {
     var currentTab by remember { mutableStateOf(0) }
     val context = LocalContext.current
     val activity = context as? androidx.activity.ComponentActivity
@@ -275,19 +304,50 @@ fun FitMinderApp(viewModel: WorkoutViewModel) {
             }
         }
     ) { innerPadding ->
+        val backgroundBitmap = remember(backgroundImagePath) {
+            if (backgroundImagePath != null) {
+                try {
+                    BitmapFactory.decodeFile(backgroundImagePath)?.asImageBitmap()
+                } catch (e: Exception) {
+                    null
+                }
+            } else null
+        }
+
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .background(
-                    brush = Brush.verticalGradient(
-                        colors = listOf(
-                            Color(0xFFF1F5F9), // Slate 100
-                            Color(0xFFE2E8F0)  // Slate 200
-                        )
-                    )
-                )
         ) {
+            if (backgroundBitmap != null) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(if (isDarkTheme) Color(0xFF0F172A) else Color(0xFFF1F5F9))
+                )
+                Image(
+                    bitmap = backgroundBitmap,
+                    contentDescription = "Ảnh nền cá nhân",
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop,
+                    alpha = if (isDarkTheme) 0.62f else 0.72f
+                )
+            } else {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(
+                            brush = Brush.verticalGradient(
+                                colors = if (isDarkTheme) {
+                                    listOf(Color(0xFF0F172A), Color(0xFF020617))
+                                } else {
+                                    listOf(Color(0xFFF1F5F9), Color(0xFFE2E8F0))
+                                }
+                            )
+                        )
+                )
+            }
+
             AnimatedContent(
                 targetState = currentTab,
                 transitionSpec = {
@@ -301,16 +361,19 @@ fun FitMinderApp(viewModel: WorkoutViewModel) {
                         viewModel = viewModel,
                         topics = categories,
                         logs = logs,
-                        onNavigateToTab = { currentTab = it }
+                        onNavigateToTab = { currentTab = it },
+                        isDarkTheme = isDarkTheme
                     )
                     1 -> StudyScheduleScreen(
                         viewModel = viewModel,
                         topics = categories,
-                        schedules = schedules
+                        schedules = schedules,
+                        isDarkTheme = isDarkTheme
                     )
                     2 -> StudyHistoryScreen(
                         viewModel = viewModel,
-                        logs = logs
+                        logs = logs,
+                        isDarkTheme = isDarkTheme
                     )
                     3 -> SyncProfileScreen(
                         viewModel = viewModel,
@@ -321,7 +384,11 @@ fun FitMinderApp(viewModel: WorkoutViewModel) {
                         isSyncing = isSyncing,
                         lastSyncTime = lastSyncTime,
                         cloudItemsCount = cloudItemsCount,
-                        autoSync = autoSync
+                        autoSync = autoSync,
+                        isDarkTheme = isDarkTheme,
+                        onDarkThemeChanged = onDarkThemeChanged,
+                        backgroundImagePath = backgroundImagePath,
+                        onBackgroundImageChanged = onBackgroundImageChanged
                     )
                 }
             }
@@ -466,7 +533,8 @@ fun DashboardScreen(
     viewModel: WorkoutViewModel,
     topics: List<CategoryEntity>,
     logs: List<WorkoutLogEntity>,
-    onNavigateToTab: (Int) -> Unit
+    onNavigateToTab: (Int) -> Unit,
+    isDarkTheme: Boolean
 ) {
     val context = LocalContext.current
     var searchQuery by remember { mutableStateOf("") }
@@ -571,12 +639,97 @@ fun DashboardScreen(
     ) {
         // --- BENTO GRID STYLE CELLS ---
         
+        // cell 3: 3 Columns Split Grid (Streak, Total study, Sync state)
+        item {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                // Streak Card
+                Card(
+                    modifier = Modifier
+                        .weight(1.5f)
+                        .height(105.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = if (isDarkTheme) Color(0xFF1E293B) else Color.White),
+                    border = BorderStroke(1.dp, if (isDarkTheme) Color(0xFF334155) else Color(0xFFE2E8F0)),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(10.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        Text("🔥 CHUỖI", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFFE11D48))
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text("$streakDays ngày", fontSize = 16.sp, fontWeight = FontWeight.ExtraBold, color = if (isDarkTheme) Color.White else Color(0xFF1E293B))
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text("liên tiếp", fontSize = 10.sp, color = if (isDarkTheme) Color(0xFF94A3B8) else Color(0xFF64748B), textAlign = TextAlign.Center, maxLines = 1)
+                    }
+                }
+
+                // Overdue Card
+                Card(
+                    modifier = Modifier
+                        .weight(1.5f)
+                        .height(105.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = if (isDarkTheme) Color(0xFF1E293B) else Color.White),
+                    border = BorderStroke(1.dp, if (isDarkTheme) Color(0xFF334155) else Color(0xFFE2E8F0)),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(10.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        Text("⚠️ ĐÃ TRỄ", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFFD97706))
+                        Spacer(modifier = Modifier.height(4.dp))
+                        val overdueCount = topics.count { getTopicStatus(it).isOverdue }
+                        Text("$overdueCount", fontSize = 16.sp, fontWeight = FontWeight.ExtraBold, color = if (overdueCount > 0) Color(0xFFEF4444) else (if (isDarkTheme) Color.White else Color(0xFF1E293B)))
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text("bài trễ hạn", fontSize = 10.sp, color = if (isDarkTheme) Color(0xFF94A3B8) else Color(0xFF64748B), textAlign = TextAlign.Center, maxLines = 1)
+                    }
+                }
+
+                // Today Card
+                Card(
+                    modifier = Modifier
+                        .weight(1.7f)
+                        .height(105.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = if (isDarkTheme) Color(0xFF1E293B) else Color.White),
+                    border = BorderStroke(1.dp, if (isDarkTheme) Color(0xFF334155) else Color(0xFFE2E8F0)),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(10.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        Text("📅 HÔM NAY", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Color(0xFF16A34A))
+                        Spacer(modifier = Modifier.height(4.dp))
+                        val dueTodayCount = topics.count { getTopicStatus(it).isDueToday }
+                        Text("$dueTodayCount", fontSize = 16.sp, fontWeight = FontWeight.ExtraBold, color = if (dueTodayCount > 0) Color(0xFF10B981) else (if (isDarkTheme) Color.White else Color(0xFF1E293B)))
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text("bài cần ôn", fontSize = 10.sp, color = if (isDarkTheme) Color(0xFF94A3B8) else Color(0xFF64748B), textAlign = TextAlign.Center, maxLines = 1)
+                    }
+                }
+            }
+        }
+
         // cell 2: Next Review Waiting Cell
         item {
             Card(
                 shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.White),
-                border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                colors = CardDefaults.cardColors(containerColor = if (isDarkTheme) Color(0xFF1E293B) else Color.White),
+                border = BorderStroke(1.dp, if (isDarkTheme) Color(0xFF334155) else Color(0xFFE2E8F0)),
                 elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
             ) {
                 Column(
@@ -596,7 +749,7 @@ fun DashboardScreen(
                             text = "GỢI Ý ÔN TẬP TIẾP THEO",
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
-                            color = Color(0xFF64748B)
+                            color = if (isDarkTheme) Color(0xFF94A3B8) else Color(0xFF64748B)
                         )
                     }
                     Spacer(modifier = Modifier.height(10.dp))
@@ -612,7 +765,7 @@ fun DashboardScreen(
                                     text = nextReviewTopic.name,
                                     fontSize = 16.sp,
                                     fontWeight = FontWeight.ExtraBold,
-                                    color = Color(0xFF1E293B),
+                                    color = if (isDarkTheme) Color.White else Color(0xFF1E293B),
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )
@@ -635,7 +788,7 @@ fun DashboardScreen(
                                     Text(
                                         text = "Lần ôn tiếp theo: Lần ${nextReviewTopic.reviewsCompleted + 1}",
                                         fontSize = 12.sp,
-                                        color = Color(0xFF64748B)
+                                        color = if (isDarkTheme) Color(0xFF94A3B8) else Color(0xFF64748B)
                                     )
                                 }
                             }
@@ -683,93 +836,8 @@ fun DashboardScreen(
                             text = "Tuyệt vời! Bạn không còn bài ôn tập trễ hạn.",
                             fontSize = 14.sp,
                             fontWeight = FontWeight.Medium,
-                            color = Color(0xFF0F172A)
+                            color = if (isDarkTheme) Color.White else Color(0xFF0F172A)
                         )
-                    }
-                }
-            }
-        }
-
-        // cell 3: 3 Columns Split Grid (Streak, Total study, Sync state)
-        item {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                // Streak Card
-                Card(
-                    modifier = Modifier
-                        .weight(1.5f)
-                        .height(105.dp),
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color.White),
-                    border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(10.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center
-                    ) {
-                        Text("🔥 CHUỖI", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFFE11D48))
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text("$streakDays ngày", fontSize = 16.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFF1E293B))
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text("liên tiếp", fontSize = 10.sp, color = Color(0xFF64748B), textAlign = TextAlign.Center, maxLines = 1)
-                    }
-                }
-
-                // Overdue Card
-                Card(
-                    modifier = Modifier
-                        .weight(1.5f)
-                        .height(105.dp),
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color.White),
-                    border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(10.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center
-                    ) {
-                        Text("⚠️ ĐÃ TRỄ", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFFD97706))
-                        Spacer(modifier = Modifier.height(4.dp))
-                        val overdueCount = topics.count { getTopicStatus(it).isOverdue }
-                        Text("$overdueCount", fontSize = 16.sp, fontWeight = FontWeight.ExtraBold, color = if (overdueCount > 0) Color(0xFFEF4444) else Color(0xFF1E293B))
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text("bài trễ hạn", fontSize = 10.sp, color = Color(0xFF64748B), textAlign = TextAlign.Center, maxLines = 1)
-                    }
-                }
-
-                // Today Card
-                Card(
-                    modifier = Modifier
-                        .weight(1.7f)
-                        .height(105.dp),
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color.White),
-                    border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(10.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center
-                    ) {
-                        Text("📅 HÔM NAY", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Color(0xFF16A34A))
-                        Spacer(modifier = Modifier.height(4.dp))
-                        val dueTodayCount = topics.count { getTopicStatus(it).isDueToday }
-                        Text("$dueTodayCount", fontSize = 16.sp, fontWeight = FontWeight.ExtraBold, color = if (dueTodayCount > 0) Color(0xFF10B981) else Color(0xFF1E293B))
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text("bài cần ôn", fontSize = 10.sp, color = Color(0xFF64748B), textAlign = TextAlign.Center, maxLines = 1)
                     }
                 }
             }
@@ -791,43 +859,52 @@ fun DashboardScreen(
                         .testTag("add_topic_button"),
                     shape = RoundedCornerShape(10.dp),
                     contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4F46E5))
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFF4F46E5),
+                        contentColor = Color.White
+                    )
                 ) {
                     Icon(
                         imageVector = Icons.Default.Add,
                         contentDescription = "Thêm",
-                        modifier = Modifier.size(16.dp)
+                        modifier = Modifier.size(16.dp),
+                        tint = Color.White
                     )
                     Spacer(modifier = Modifier.width(4.dp))
                     Text(
                         text = "Thêm Chủ Đề",
                         fontWeight = FontWeight.Bold,
                         fontSize = 12.sp,
+                        color = Color.White,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
                 }
 
-                OutlinedButton(
+                Button(
                     onClick = { showGeneralTimelineDialog = true },
                     modifier = Modifier
                         .weight(1f)
                         .height(46.dp),
                     shape = RoundedCornerShape(10.dp),
                     contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp),
-                    border = BorderStroke(1.5.dp, Color(0xFF4F46E5)),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF4F46E5))
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFF4F46E5),
+                        contentColor = Color.White
+                    )
                 ) {
                     Icon(
                         imageVector = Icons.Default.CalendarMonth,
                         contentDescription = "Timeline",
-                        modifier = Modifier.size(16.dp)
+                        modifier = Modifier.size(16.dp),
+                        tint = Color.White
                     )
                     Spacer(modifier = Modifier.width(4.dp))
                     Text(
                         text = "Timeline Chung",
                         fontWeight = FontWeight.Bold,
                         fontSize = 12.sp,
+                        color = Color.White,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
@@ -840,8 +917,8 @@ fun DashboardScreen(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(Color.White, RoundedCornerShape(16.dp))
-                    .border(1.dp, Color(0xFFE2E8F0), RoundedCornerShape(16.dp))
+                    .background(if (isDarkTheme) Color(0xFF1E293B) else Color.White, RoundedCornerShape(16.dp))
+                    .border(1.dp, if (isDarkTheme) Color(0xFF334155) else Color(0xFFE2E8F0), RoundedCornerShape(16.dp))
                     .padding(14.dp)
             ) {
                 Row(
@@ -853,7 +930,7 @@ fun DashboardScreen(
                         text = "📁 Thư mục học tập (${activeFolders.size - 1})",
                         fontSize = 13.sp,
                         fontWeight = FontWeight.Bold,
-                        color = Color(0xFF1E293B)
+                        color = if (isDarkTheme) Color.White else Color(0xFF1E293B)
                     )
                 }
                 Spacer(modifier = Modifier.height(8.dp))
@@ -864,9 +941,9 @@ fun DashboardScreen(
                     activeFolders.forEach { folder ->
                         item {
                             val isSelected = selectedFolderName == folder
-                            val folderBg = if (isSelected) Color(0xFF4F46E5) else Color(0xFFF8FAFC)
-                            val folderColor = if (isSelected) Color.White else Color(0xFF475569)
-                            val folderBorder = if (isSelected) Color(0xFF4F46E5) else Color(0xFFE2E8F0)
+                            val folderBg = if (isSelected) Color(0xFF4F46E5) else (if (isDarkTheme) Color(0xFF334155) else Color(0xFFF8FAFC))
+                            val folderColor = if (isSelected) Color.White else (if (isDarkTheme) Color(0xFFCBD5E1) else Color(0xFF475569))
+                            val folderBorder = if (isSelected) Color(0xFF4F46E5) else (if (isDarkTheme) Color(0xFF475569) else Color(0xFFE2E8F0))
                             
                             Row(
                                 modifier = Modifier
@@ -895,14 +972,14 @@ fun DashboardScreen(
                                     Box(
                                         modifier = Modifier
                                             .clip(CircleShape)
-                                            .background(if (isSelected) Color(0x33FFFFFF) else Color(0xFFE2E8F0))
+                                            .background(if (isSelected) Color(0x33FFFFFF) else (if (isDarkTheme) Color(0xFF1E293B) else Color(0xFFE2E8F0)))
                                             .padding(horizontal = 6.dp, vertical = 2.dp)
                                     ) {
                                         Text(
                                             text = "${topics.count { it.folderName == folder }}",
                                             fontSize = 9.sp,
                                             fontWeight = FontWeight.Bold,
-                                            color = if (isSelected) Color.White else Color(0xFF4F46E5)
+                                            color = if (isSelected) Color.White else (if (isDarkTheme) Color(0xFF818CF8) else Color(0xFF4F46E5))
                                         )
                                     }
                                 }
@@ -920,7 +997,7 @@ fun DashboardScreen(
                 onValueChange = { searchQuery = it },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(Color.White, RoundedCornerShape(12.dp)),
+                    .background(if (isDarkTheme) Color(0xFF1E293B) else Color.White, RoundedCornerShape(12.dp)),
                 placeholder = { Text("Tìm kiếm nhanh chủ đề...", color = Color.Gray, fontSize = 14.sp) },
                 leadingIcon = { Icon(Icons.Default.Search, contentDescription = "Tìm kiếm", tint = Color.Gray) },
                 trailingIcon = {
@@ -933,10 +1010,12 @@ fun DashboardScreen(
                 shape = RoundedCornerShape(12.dp),
                 singleLine = true,
                 colors = OutlinedTextFieldDefaults.colors(
-                    focusedTextColor = Color(0xFF1E293B),
-                    unfocusedTextColor = Color(0xFF1E293B),
+                    focusedTextColor = if (isDarkTheme) Color.White else Color(0xFF1E293B),
+                    unfocusedTextColor = if (isDarkTheme) Color.White else Color(0xFF1E293B),
+                    focusedContainerColor = if (isDarkTheme) Color(0xFF1E293B) else Color.White,
+                    unfocusedContainerColor = if (isDarkTheme) Color(0xFF1E293B) else Color.White,
                     focusedBorderColor = Color(0xFF4F46E5),
-                    unfocusedBorderColor = Color(0xFFE2E8F0)
+                    unfocusedBorderColor = if (isDarkTheme) Color(0xFF334155) else Color(0xFFE2E8F0)
                 )
             )
         }
@@ -958,12 +1037,12 @@ fun DashboardScreen(
                             colors = FilterChipDefaults.filterChipColors(
                                 selectedContainerColor = Color(0xFF4F46E5),
                                 selectedLabelColor = Color.White,
-                                containerColor = Color.White,
-                                labelColor = Color(0xFF475569)
+                                containerColor = if (isDarkTheme) Color(0xFF1E293B) else Color.White,
+                                labelColor = if (isDarkTheme) Color(0xFFCBD5E1) else Color(0xFF475569)
                             ),
                             border = BorderStroke(
                                 width = 1.dp,
-                                color = if (isSelected) Color(0xFF4F46E5) else Color(0xFFE2E8F0)
+                                color = if (isSelected) Color(0xFF4F46E5) else (if (isDarkTheme) Color(0xFF334155) else Color(0xFFE2E8F0))
                             )
                         )
                     }
@@ -977,7 +1056,7 @@ fun DashboardScreen(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(Color.White, RoundedCornerShape(16.dp))
+                        .background(if (isDarkTheme) Color(0xFF1E293B) else Color.White, RoundedCornerShape(16.dp))
                         .padding(vertical = 44.dp, horizontal = 16.dp),
                     contentAlignment = Alignment.Center
                 ) {
@@ -993,7 +1072,7 @@ fun DashboardScreen(
                             text = if (topics.isEmpty()) "Chưa có chủ đề nào được theo dõi" else "Không có chủ đề khớp bộ lọc này",
                             fontSize = 14.sp,
                             fontWeight = FontWeight.Bold,
-                            color = Color(0xFF475569)
+                            color = if (isDarkTheme) Color.White else Color(0xFF475569)
                         )
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
@@ -1016,8 +1095,8 @@ fun DashboardScreen(
                         .fillMaxWidth()
                         .clickable { selectedTopicForTimeline = topic },
                     shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color.White),
-                    border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                    colors = CardDefaults.cardColors(containerColor = if (isDarkTheme) Color(0xFF1E293B) else Color.White),
+                    border = BorderStroke(1.dp, if (isDarkTheme) Color(0xFF334155) else Color(0xFFE2E8F0)),
                     elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
@@ -1031,14 +1110,14 @@ fun DashboardScreen(
                                         modifier = Modifier
                                             .weight(1f, fill = false)
                                             .clip(RoundedCornerShape(4.dp))
-                                            .background(Color(0xFFEEF2F6))
+                                            .background(if (isDarkTheme) Color(0xFF334155) else Color(0xFFEEF2F6))
                                             .padding(horizontal = 6.dp, vertical = 2.dp)
                                     ) {
                                         Text(
                                             text = "📁 " + topic.folderName,
                                             fontSize = 9.sp,
                                             fontWeight = FontWeight.Bold,
-                                            color = Color(0xFF4F46E5),
+                                            color = if (isDarkTheme) Color(0xFF818CF8) else Color(0xFF4F46E5),
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis
                                         )
@@ -1047,14 +1126,14 @@ fun DashboardScreen(
                                     Box(
                                         modifier = Modifier
                                             .clip(RoundedCornerShape(4.dp))
-                                            .background(Color(0xFFFFF7ED))
+                                            .background(if (isDarkTheme) Color(0xFF451A03) else Color(0xFFFFF7ED))
                                             .padding(horizontal = 6.dp, vertical = 2.dp)
                                     ) {
                                         Text(
                                             text = "⏰ " + topic.reviewTime,
                                             fontSize = 9.sp,
                                             fontWeight = FontWeight.Bold,
-                                            color = Color(0xFFEA580C)
+                                            color = if (isDarkTheme) Color(0xFFFB923C) else Color(0xFFEA580C)
                                         )
                                     }
                                 }
@@ -1063,7 +1142,7 @@ fun DashboardScreen(
                                     text = topic.name,
                                     fontSize = 15.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color = Color(0xFF0F172A),
+                                    color = if (isDarkTheme) Color.White else Color(0xFF0F172A),
                                     maxLines = 3,
                                     overflow = TextOverflow.Ellipsis
                                 )
@@ -1075,7 +1154,7 @@ fun DashboardScreen(
                                 Text(
                                     text = "Bắt đầu học: " + sdfDisplay.format(parsedBase),
                                     fontSize = 11.sp,
-                                    color = Color(0xFF64748B)
+                                    color = if (isDarkTheme) Color(0xFF94A3B8) else Color(0xFF64748B)
                                 )
                             }
                             
@@ -1106,7 +1185,7 @@ fun DashboardScreen(
                                 text = "Tiến độ lặp lại: ${topic.reviewsCompleted}/5 lần ôn tập",
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = Color(0xFF475569)
+                                color = if (isDarkTheme) Color(0xFFCBD5E1) else Color(0xFF475569)
                             )
                             Text(
                                 text = status.relativeText,
@@ -1126,11 +1205,11 @@ fun DashboardScreen(
                                 .height(8.dp)
                                 .clip(RoundedCornerShape(4.dp)),
                             color = if (topic.reviewsCompleted >= 5) Color(0xFF10B981) else Color(0xFF4F46E5),
-                            trackColor = Color(0xFFE2E8F0)
+                            trackColor = if (isDarkTheme) Color(0xFF334155) else Color(0xFFE2E8F0)
                         )
                         
                         Spacer(modifier = Modifier.height(10.dp))
-                        Divider(color = Color(0xFFF1F5F9))
+                        Divider(color = if (isDarkTheme) Color(0xFF334155) else Color(0xFFF1F5F9))
                         Spacer(modifier = Modifier.height(6.dp))
                         
                         Row(
@@ -1151,11 +1230,11 @@ fun DashboardScreen(
                                 Icon(
                                     imageVector = Icons.Default.Notifications,
                                     contentDescription = "Cài đặt thông báo",
-                                    tint = Color(0xFFEA580C),
+                                    tint = if (isDarkTheme) Color(0xFFFB923C) else Color(0xFFEA580C),
                                     modifier = Modifier.size(16.dp)
                                 )
                                 Spacer(modifier = Modifier.width(4.dp))
-                                Text("Cài đặt TB", fontSize = 12.sp, color = Color(0xFFEA580C))
+                                Text("Cài đặt TB", fontSize = 12.sp, color = if (isDarkTheme) Color(0xFFFB923C) else Color(0xFFEA580C))
                             }
                             
                             Spacer(modifier = Modifier.width(16.dp))
@@ -1173,11 +1252,11 @@ fun DashboardScreen(
                                 Icon(
                                     imageVector = Icons.Default.Edit,
                                     contentDescription = "Sửa",
-                                    tint = Color(0xFF4F46E5),
+                                    tint = if (isDarkTheme) Color(0xFF818CF8) else Color(0xFF4F46E5),
                                     modifier = Modifier.size(16.dp)
                                 )
                                 Spacer(modifier = Modifier.width(4.dp))
-                                Text("Sửa", fontSize = 12.sp, color = Color(0xFF4F46E5))
+                                Text("Sửa", fontSize = 12.sp, color = if (isDarkTheme) Color(0xFF818CF8) else Color(0xFF4F46E5))
                             }
                             
                             Spacer(modifier = Modifier.width(16.dp))
@@ -1234,7 +1313,7 @@ fun DashboardScreen(
         Dialog(onDismissRequest = { showAddTopicDialog = false }) {
             Card(
                 shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.White),
+                colors = CardDefaults.cardColors(containerColor = if (isDarkTheme) Color(0xFF1E293B) else Color.White),
                 modifier = Modifier
                     .fillMaxWidth()
                     .fillMaxHeight(0.85f)
@@ -1251,7 +1330,7 @@ fun DashboardScreen(
                         text = "Thêm Chủ Đề Ôn Tập Mới",
                         fontSize = 18.sp,
                         fontWeight = FontWeight.Bold,
-                        color = Color(0xFF1E293B)
+                        color = if (isDarkTheme) Color.White else Color(0xFF1E293B)
                     )
                     Spacer(modifier = Modifier.height(16.dp))
                     
@@ -1262,10 +1341,12 @@ fun DashboardScreen(
                         label = { Text("Tên chủ đề từ vựng / bài giảng") },
                         placeholder = { Text("Ví dụ: Từ vựng IELTS Unit 5") },
                         colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = Color(0xFF1E293B),
-                            unfocusedTextColor = Color(0xFF1E293B),
+                            focusedTextColor = if (isDarkTheme) Color.White else Color(0xFF1E293B),
+                            unfocusedTextColor = if (isDarkTheme) Color.White else Color(0xFF1E293B),
+                            focusedContainerColor = if (isDarkTheme) Color(0xFF1E293B) else Color.White,
+                            unfocusedContainerColor = if (isDarkTheme) Color(0xFF1E293B) else Color.White,
                             focusedBorderColor = Color(0xFF4F46E5),
-                            unfocusedBorderColor = Color(0xFFCBD5E1)
+                            unfocusedBorderColor = if (isDarkTheme) Color(0xFF334155) else Color(0xFFCBD5E1)
                         )
                     )
                     Spacer(modifier = Modifier.height(12.dp))
@@ -1278,10 +1359,12 @@ fun DashboardScreen(
                         placeholder = { Text("Ví dụ: Bạn rất giỏi! Hãy học bài nào!") },
                         maxLines = 3,
                         colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = Color(0xFF1E293B),
-                            unfocusedTextColor = Color(0xFF1E293B),
+                            focusedTextColor = if (isDarkTheme) Color.White else Color(0xFF1E293B),
+                            unfocusedTextColor = if (isDarkTheme) Color.White else Color(0xFF1E293B),
+                            focusedContainerColor = if (isDarkTheme) Color(0xFF1E293B) else Color.White,
+                            unfocusedContainerColor = if (isDarkTheme) Color(0xFF1E293B) else Color.White,
                             focusedBorderColor = Color(0xFF4F46E5),
-                            unfocusedBorderColor = Color(0xFFCBD5E1)
+                            unfocusedBorderColor = if (isDarkTheme) Color(0xFF334155) else Color(0xFFCBD5E1)
                         )
                     )
                     Spacer(modifier = Modifier.height(12.dp))
@@ -1293,10 +1376,12 @@ fun DashboardScreen(
                         label = { Text("Thư mục lưu trữ") },
                         placeholder = { Text("Ví dụ: Tiếng Anh, Lập trình...") },
                         colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = Color(0xFF1E293B),
-                            unfocusedTextColor = Color(0xFF1E293B),
+                            focusedTextColor = if (isDarkTheme) Color.White else Color(0xFF1E293B),
+                            unfocusedTextColor = if (isDarkTheme) Color.White else Color(0xFF1E293B),
+                            focusedContainerColor = if (isDarkTheme) Color(0xFF1E293B) else Color.White,
+                            unfocusedContainerColor = if (isDarkTheme) Color(0xFF1E293B) else Color.White,
                             focusedBorderColor = Color(0xFF4F46E5),
-                            unfocusedBorderColor = Color(0xFFCBD5E1)
+                            unfocusedBorderColor = if (isDarkTheme) Color(0xFF334155) else Color(0xFFCBD5E1)
                         )
                     )
                     
@@ -1309,7 +1394,7 @@ fun DashboardScreen(
                             text = "Gợi ý thư mục hiện có (Chạm để chọn):",
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Medium,
-                            color = Color(0xFF64748B)
+                            color = if (isDarkTheme) Color(0xFFCBD5E1) else Color(0xFF64748B)
                         )
                         Spacer(modifier = Modifier.height(4.dp))
                         LazyRow(
@@ -1321,12 +1406,12 @@ fun DashboardScreen(
                                     Box(
                                         modifier = Modifier
                                             .clip(RoundedCornerShape(6.dp))
-                                            .background(Color(0xFFEEF2F6))
-                                            .border(1.dp, Color(0xFFE2E8F0), RoundedCornerShape(6.dp))
+                                            .background(if (isDarkTheme) Color(0xFF334155) else Color(0xFFEEF2F6))
+                                            .border(1.dp, if (isDarkTheme) Color(0xFF475569) else Color(0xFFE2E8F0), RoundedCornerShape(6.dp))
                                             .clickable { folderName = sugg }
                                             .padding(horizontal = 10.dp, vertical = 5.dp)
                                     ) {
-                                        Text(sugg, fontSize = 11.sp, color = Color(0xFF4F46E5), fontWeight = FontWeight.SemiBold)
+                                        Text(sugg, fontSize = 11.sp, color = if (isDarkTheme) Color(0xFF818CF8) else Color(0xFF4F46E5), fontWeight = FontWeight.SemiBold)
                                     }
                                 }
                             }
@@ -1338,14 +1423,14 @@ fun DashboardScreen(
                         text = "Giờ nhắc hẹn ôn tập hàng ngày",
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
-                        color = Color(0xFF475569)
+                        color = if (isDarkTheme) Color.White else Color(0xFF475569)
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .border(1.dp, Color(0xFFCBD5E1), RoundedCornerShape(4.dp))
+                            .border(1.dp, if (isDarkTheme) Color(0xFF334155) else Color(0xFFCBD5E1), RoundedCornerShape(4.dp))
                             .clickable {
                                 android.app.TimePickerDialog(
                                     context,
@@ -1367,9 +1452,9 @@ fun DashboardScreen(
                             text = reviewTimeStr,
                             fontSize = 14.sp,
                             fontWeight = FontWeight.Medium,
-                            color = Color(0xFF1E293B)
+                            color = if (isDarkTheme) Color.White else Color(0xFF1E293B)
                         )
-                        Icon(imageVector = Icons.Default.Notifications, contentDescription = "Chọn giờ", tint = Color(0xFF4F46E5))
+                        Icon(imageVector = Icons.Default.Notifications, contentDescription = "Chọn giờ", tint = if (isDarkTheme) Color(0xFF818CF8) else Color(0xFF4F46E5))
                     }
                     Spacer(modifier = Modifier.height(12.dp))
                     
@@ -1377,14 +1462,14 @@ fun DashboardScreen(
                         text = "Ngày bắt đầu học",
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
-                        color = Color(0xFF475569)
+                        color = if (isDarkTheme) Color.White else Color(0xFF475569)
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .border(1.dp, Color(0xFFCBD5E1), RoundedCornerShape(4.dp))
+                            .border(1.dp, if (isDarkTheme) Color(0xFF334155) else Color(0xFFCBD5E1), RoundedCornerShape(4.dp))
                             .clickable {
                                 val calendar = Calendar.getInstance()
                                 DatePickerDialog(
@@ -1407,9 +1492,9 @@ fun DashboardScreen(
                             text = studyDateString,
                             fontSize = 14.sp,
                             fontWeight = FontWeight.Medium,
-                            color = Color(0xFF1E293B)
+                            color = if (isDarkTheme) Color.White else Color(0xFF1E293B)
                         )
-                        Icon(imageVector = Icons.Default.CalendarToday, contentDescription = "Chọn ngày", tint = Color(0xFF4F46E5))
+                        Icon(imageVector = Icons.Default.CalendarToday, contentDescription = "Chọn ngày", tint = if (isDarkTheme) Color(0xFF818CF8) else Color(0xFF4F46E5))
                     }
                     Spacer(modifier = Modifier.height(12.dp))
 
@@ -1418,15 +1503,15 @@ fun DashboardScreen(
                         text = "⚙️ Cài đặt mốc khoảng cách lặp",
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
-                        color = Color(0xFF475569)
+                        color = if (isDarkTheme) Color.White else Color(0xFF475569)
                     )
                     Spacer(modifier = Modifier.height(6.dp))
                     
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .border(1.dp, Color(0xFFCBD5E1), RoundedCornerShape(8.dp))
-                            .background(Color(0xFFF8FAFC))
+                            .border(1.dp, if (isDarkTheme) Color(0xFF334155) else Color(0xFFCBD5E1), RoundedCornerShape(8.dp))
+                            .background(if (isDarkTheme) Color(0xFF1E293B) else Color(0xFFF8FAFC))
                             .padding(12.dp),
                         verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
@@ -1444,8 +1529,8 @@ fun DashboardScreen(
                             )
                             Spacer(modifier = Modifier.width(4.dp))
                             Column {
-                                Text("Ôn tập lặp 5 lần (Mặc định)", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF1E293B))
-                                Text("Khoảng cách tăng dần (1, 3, 7, 15, 30 ngày) hoặc tùy chỉnh", fontSize = 11.sp, color = Color(0xFF64748B))
+                                Text("Ôn tập lặp 5 lần (Mặc định)", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = if (isDarkTheme) Color.White else Color(0xFF1E293B))
+                                Text("Khoảng cách tăng dần (1, 3, 7, 15, 30 ngày) hoặc tùy chỉnh", fontSize = 11.sp, color = if (isDarkTheme) Color(0xFFCBD5E1) else Color(0xFF64748B))
                              }
                         }
                         
@@ -1463,8 +1548,8 @@ fun DashboardScreen(
                             )
                             Spacer(modifier = Modifier.width(4.dp))
                             Column {
-                                Text("Mỗi ngày", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF1E293B))
-                                Text("Ôn tập liên tiếp hàng ngày", fontSize = 11.sp, color = Color(0xFF64748B))
+                                Text("Mỗi ngày", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = if (isDarkTheme) Color.White else Color(0xFF1E293B))
+                                Text("Ôn tập liên tiếp hàng ngày", fontSize = 11.sp, color = if (isDarkTheme) Color(0xFFCBD5E1) else Color(0xFF64748B))
                             }
                         }
 
@@ -1482,8 +1567,8 @@ fun DashboardScreen(
                             )
                             Spacer(modifier = Modifier.width(4.dp))
                             Column {
-                                Text("Sau mỗi n ngày", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF1E293B))
-                                Text("Lặp lại định kỳ sau mỗi n ngày", fontSize = 11.sp, color = Color(0xFF64748B))
+                                Text("Sau mỗi n ngày", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = if (isDarkTheme) Color.White else Color(0xFF1E293B))
+                                Text("Lặp lại định kỳ sau mỗi n ngày", fontSize = 11.sp, color = if (isDarkTheme) Color(0xFFCBD5E1) else Color(0xFF64748B))
                             }
                         }
                         
@@ -1494,27 +1579,27 @@ fun DashboardScreen(
                                     .fillMaxWidth(),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text("Số ngày (n): ", fontSize = 12.sp, color = Color(0xFF475569))
+                                Text("Số ngày (n): ", fontSize = 12.sp, color = if (isDarkTheme) Color.White else Color(0xFF475569))
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
                                     modifier = Modifier
-                                        .border(1.dp, Color(0xFFCBD5E1), RoundedCornerShape(4.dp))
-                                        .background(Color.White)
+                                        .border(1.dp, if (isDarkTheme) Color(0xFF334155) else Color(0xFFCBD5E1), RoundedCornerShape(4.dp))
+                                        .background(if (isDarkTheme) Color(0xFF0F172A) else Color.White)
                                         .padding(horizontal = 8.dp, vertical = 4.dp)
                                 ) {
                                     Text(
                                         text = "$everyNDays ngày", 
                                         fontSize = 12.sp, 
                                         fontWeight = FontWeight.Bold, 
-                                        color = Color(0xFF1E293B)
+                                        color = if (isDarkTheme) Color.White else Color(0xFF1E293B)
                                     )
                                     Spacer(modifier = Modifier.width(16.dp))
                                     Column {
                                         Icon(
                                             imageVector = Icons.Default.ArrowDropUp, 
                                             contentDescription = "Tăng",
-                                            tint = Color(0xFF4F46E5),
+                                            tint = if (isDarkTheme) Color(0xFF818CF8) else Color(0xFF4F46E5),
                                             modifier = Modifier
                                                 .size(16.dp)
                                                 .clickable { everyNDays += 1 }
@@ -1522,7 +1607,7 @@ fun DashboardScreen(
                                         Icon(
                                             imageVector = Icons.Default.ArrowDropDown, 
                                             contentDescription = "Giảm",
-                                            tint = Color(0xFF64748B),
+                                            tint = if (isDarkTheme) Color(0xFFCBD5E1) else Color(0xFF64748B),
                                             modifier = Modifier
                                                 .size(16.dp)
                                                 .clickable { if (everyNDays > 1) everyNDays -= 1 }
@@ -1546,8 +1631,8 @@ fun DashboardScreen(
                             )
                             Spacer(modifier = Modifier.width(4.dp))
                             Column {
-                                Text("Nhắc vào 1 ngày nhất định theo lịch", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF1E293B))
-                                Text("Chọn chính xác ngày cần nhắc nhở", fontSize = 11.sp, color = Color(0xFF64748B))
+                                Text("Nhắc vào 1 ngày nhất định theo lịch", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = if (isDarkTheme) Color.White else Color(0xFF1E293B))
+                                Text("Chọn chính xác ngày cần nhắc nhở", fontSize = 11.sp, color = if (isDarkTheme) Color(0xFFCBD5E1) else Color(0xFF64748B))
                             }
                         }
                         
@@ -1556,8 +1641,8 @@ fun DashboardScreen(
                                 modifier = Modifier
                                     .padding(start = 36.dp)
                                     .fillMaxWidth()
-                                    .border(1.dp, Color(0xFFCBD5E1), RoundedCornerShape(4.dp))
-                                    .background(Color.White)
+                                    .border(1.dp, if (isDarkTheme) Color(0xFF334155) else Color(0xFFCBD5E1), RoundedCornerShape(4.dp))
+                                    .background(if (isDarkTheme) Color(0xFF0F172A) else Color.White)
                                     .clickable {
                                         val calendar = Calendar.getInstance()
                                         DatePickerDialog(
@@ -1580,9 +1665,9 @@ fun DashboardScreen(
                                     text = specificReminderDate,
                                     fontSize = 13.sp,
                                     fontWeight = FontWeight.Medium,
-                                    color = Color(0xFF1E293B)
+                                    color = if (isDarkTheme) Color.White else Color(0xFF1E293B)
                                 )
-                                Icon(imageVector = Icons.Default.CalendarToday, contentDescription = "Chọn ngày", tint = Color(0xFF4F46E5), modifier = Modifier.size(16.dp))
+                                Icon(imageVector = Icons.Default.CalendarToday, contentDescription = "Chọn ngày", tint = if (isDarkTheme) Color(0xFF818CF8) else Color(0xFF4F46E5), modifier = Modifier.size(16.dp))
                             }
                         }
                     }
@@ -1601,12 +1686,12 @@ fun DashboardScreen(
                                 text = "✏️ Tùy chỉnh chi tiết khoảng cách (lần 1-5)",
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = Color(0xFF4F46E5)
+                                color = if (isDarkTheme) Color(0xFF818CF8) else Color(0xFF4F46E5)
                             )
                             Icon(
                                 imageVector = if (expandIntervals) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
                                 contentDescription = "Expand",
-                                tint = Color(0xFF4F46E5),
+                                tint = if (isDarkTheme) Color(0xFF818CF8) else Color(0xFF4F46E5),
                                 modifier = Modifier.size(16.dp)
                             )
                         }
@@ -1628,20 +1713,20 @@ fun DashboardScreen(
                                         modifier = Modifier.weight(1f),
                                         horizontalAlignment = Alignment.CenterHorizontally
                                     ) {
-                                        Text(cfg.label, fontSize = 9.sp, fontWeight = FontWeight.Medium, color = Color(0xFF64748B))
+                                        Text(cfg.label, fontSize = 9.sp, fontWeight = FontWeight.Medium, color = if (isDarkTheme) Color(0xFFCBD5E1) else Color(0xFF64748B))
                                         Spacer(modifier = Modifier.height(4.dp))
                                         Row(
                                             verticalAlignment = Alignment.CenterVertically,
                                             modifier = Modifier
-                                                .border(1.dp, Color(0xFFCBD5E1), RoundedCornerShape(4.dp))
-                                                .background(Color(0xFFF8FAFC))
+                                                .border(1.dp, if (isDarkTheme) Color(0xFF334155) else Color(0xFFCBD5E1), RoundedCornerShape(4.dp))
+                                                .background(if (isDarkTheme) Color(0xFF334155) else Color(0xFFF8FAFC))
                                                 .padding(horizontal = 2.dp, vertical = 2.dp)
                                         ) {
                                             Text(
                                                 text = "${cfg.value} d", 
                                                 fontSize = 9.sp, 
                                                 fontWeight = FontWeight.Bold, 
-                                                color = Color(0xFF1E293B),
+                                                color = if (isDarkTheme) Color.White else Color(0xFF1E293B),
                                                 modifier = Modifier.weight(1f),
                                                 textAlign = TextAlign.Center
                                             )
@@ -1649,7 +1734,7 @@ fun DashboardScreen(
                                                 Icon(
                                                     imageVector = Icons.Default.ArrowDropUp, 
                                                     contentDescription = "Lên",
-                                                    tint = Color(0xFF4F46E5),
+                                                    tint = if (isDarkTheme) Color(0xFF818CF8) else Color(0xFF4F46E5),
                                                     modifier = Modifier
                                                         .size(14.dp)
                                                         .clickable { cfg.onValueChange(cfg.value + 1) }
@@ -1657,7 +1742,7 @@ fun DashboardScreen(
                                                 Icon(
                                                     imageVector = Icons.Default.ArrowDropDown, 
                                                     contentDescription = "Xuống",
-                                                    tint = Color(0xFF64748B),
+                                                    tint = if (isDarkTheme) Color(0xFFCBD5E1) else Color(0xFF64748B),
                                                     modifier = Modifier
                                                         .size(14.dp)
                                                         .clickable { if (cfg.value > 1) cfg.onValueChange(cfg.value - 1) }
@@ -1780,7 +1865,7 @@ fun DashboardScreen(
         Dialog(onDismissRequest = { editingTopic = null }) {
             Card(
                 shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.White),
+                colors = CardDefaults.cardColors(containerColor = if (isDarkTheme) Color(0xFF1E293B) else Color.White),
                 modifier = Modifier
                     .fillMaxWidth()
                     .fillMaxHeight(0.85f)
@@ -1797,7 +1882,7 @@ fun DashboardScreen(
                         text = "Chỉnh Sửa Chủ Đề Ôn Tập",
                         fontSize = 18.sp,
                         fontWeight = FontWeight.Bold,
-                        color = Color(0xFF1E293B)
+                        color = if (isDarkTheme) Color.White else Color(0xFF1E293B)
                     )
                     Spacer(modifier = Modifier.height(16.dp))
                     
@@ -1807,10 +1892,12 @@ fun DashboardScreen(
                         modifier = Modifier.fillMaxWidth(),
                         label = { Text("Tên chủ đề từ vựng / bài giảng") },
                         colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = Color(0xFF1E293B),
-                            unfocusedTextColor = Color(0xFF1E293B),
+                            focusedTextColor = if (isDarkTheme) Color.White else Color(0xFF1E293B),
+                            unfocusedTextColor = if (isDarkTheme) Color.White else Color(0xFF1E293B),
+                            focusedContainerColor = if (isDarkTheme) Color(0xFF1E293B) else Color.White,
+                            unfocusedContainerColor = if (isDarkTheme) Color(0xFF1E293B) else Color.White,
                             focusedBorderColor = Color(0xFF4F46E5),
-                            unfocusedBorderColor = Color(0xFFCBD5E1)
+                            unfocusedBorderColor = if (isDarkTheme) Color(0xFF334155) else Color(0xFFCBD5E1)
                         )
                     )
                     Spacer(modifier = Modifier.height(12.dp))
@@ -1821,10 +1908,12 @@ fun DashboardScreen(
                         modifier = Modifier.fillMaxWidth(),
                         label = { Text("Thư mục lưu trữ") },
                         colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = Color(0xFF1E293B),
-                            unfocusedTextColor = Color(0xFF1E293B),
+                            focusedTextColor = if (isDarkTheme) Color.White else Color(0xFF1E293B),
+                            unfocusedTextColor = if (isDarkTheme) Color.White else Color(0xFF1E293B),
+                            focusedContainerColor = if (isDarkTheme) Color(0xFF1E293B) else Color.White,
+                            unfocusedContainerColor = if (isDarkTheme) Color(0xFF1E293B) else Color.White,
                             focusedBorderColor = Color(0xFF4F46E5),
-                            unfocusedBorderColor = Color(0xFFCBD5E1)
+                            unfocusedBorderColor = if (isDarkTheme) Color(0xFF334155) else Color(0xFFCBD5E1)
                         )
                     )
                     
@@ -1837,7 +1926,7 @@ fun DashboardScreen(
                             text = "Gợi ý thư mục hiện có (Chạm để chọn):",
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Medium,
-                            color = Color(0xFF64748B)
+                            color = if (isDarkTheme) Color(0xFFCBD5E1) else Color(0xFF64748B)
                         )
                         Spacer(modifier = Modifier.height(4.dp))
                         LazyRow(
@@ -1849,12 +1938,12 @@ fun DashboardScreen(
                                     Box(
                                         modifier = Modifier
                                             .clip(RoundedCornerShape(6.dp))
-                                            .background(Color(0xFFEEF2F6))
-                                            .border(1.dp, Color(0xFFE2E8F0), RoundedCornerShape(6.dp))
+                                            .background(if (isDarkTheme) Color(0xFF334155) else Color(0xFFEEF2F6))
+                                            .border(1.dp, if (isDarkTheme) Color(0xFF475569) else Color(0xFFE2E8F0), RoundedCornerShape(6.dp))
                                             .clickable { folderName = sugg }
                                             .padding(horizontal = 10.dp, vertical = 5.dp)
                                     ) {
-                                        Text(sugg, fontSize = 11.sp, color = Color(0xFF4F46E5), fontWeight = FontWeight.SemiBold)
+                                        Text(sugg, fontSize = 11.sp, color = if (isDarkTheme) Color(0xFF818CF8) else Color(0xFF4F46E5), fontWeight = FontWeight.SemiBold)
                                     }
                                 }
                             }
@@ -1866,14 +1955,14 @@ fun DashboardScreen(
                         text = "Giờ nhắc hẹn ôn tập hàng ngày",
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
-                        color = Color(0xFF475569)
+                        color = if (isDarkTheme) Color.White else Color(0xFF475569)
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .border(1.dp, Color(0xFFCBD5E1), RoundedCornerShape(4.dp))
+                            .border(1.dp, if (isDarkTheme) Color(0xFF334155) else Color(0xFFCBD5E1), RoundedCornerShape(4.dp))
                             .clickable {
                                 android.app.TimePickerDialog(
                                     context,
@@ -1895,9 +1984,9 @@ fun DashboardScreen(
                             text = reviewTimeStr,
                             fontSize = 14.sp,
                             fontWeight = FontWeight.Medium,
-                            color = Color(0xFF1E293B)
+                            color = if (isDarkTheme) Color.White else Color(0xFF1E293B)
                         )
-                        Icon(imageVector = Icons.Default.Notifications, contentDescription = "Chọn giờ", tint = Color(0xFF4F46E5))
+                        Icon(imageVector = Icons.Default.Notifications, contentDescription = "Chọn giờ", tint = if (isDarkTheme) Color(0xFF818CF8) else Color(0xFF4F46E5))
                     }
                     Spacer(modifier = Modifier.height(12.dp))
                     
@@ -1905,14 +1994,14 @@ fun DashboardScreen(
                         text = "Ngày bắt đầu học",
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
-                        color = Color(0xFF475569)
+                        color = if (isDarkTheme) Color.White else Color(0xFF475569)
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .border(1.dp, Color(0xFFCBD5E1), RoundedCornerShape(4.dp))
+                            .border(1.dp, if (isDarkTheme) Color(0xFF334155) else Color(0xFFCBD5E1), RoundedCornerShape(4.dp))
                             .clickable {
                                 val dateParts = studyDateString.split("-")
                                 val yr = dateParts.getOrNull(0)?.toIntOrNull() ?: Calendar.getInstance().get(Calendar.YEAR)
@@ -1938,9 +2027,9 @@ fun DashboardScreen(
                             text = studyDateString,
                             fontSize = 14.sp,
                             fontWeight = FontWeight.Medium,
-                            color = Color(0xFF1E293B)
+                            color = if (isDarkTheme) Color.White else Color(0xFF1E293B)
                         )
-                        Icon(imageVector = Icons.Default.CalendarToday, contentDescription = "Chọn ngày", tint = Color(0xFF4F46E5))
+                        Icon(imageVector = Icons.Default.CalendarToday, contentDescription = "Chọn ngày", tint = if (isDarkTheme) Color(0xFF818CF8) else Color(0xFF4F46E5))
                     }
                     Spacer(modifier = Modifier.height(12.dp))
 
@@ -1957,12 +2046,12 @@ fun DashboardScreen(
                             text = "⚙️ Chỉnh sửa mốc khoảng cách lặp (lần 1-5)",
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,
-                            color = Color(0xFF4F46E5)
+                            color = if (isDarkTheme) Color(0xFF818CF8) else Color(0xFF4F46E5)
                         )
                         Icon(
                             imageVector = if (expandIntervals) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
                             contentDescription = "Expand",
-                            tint = Color(0xFF4F46E5),
+                            tint = if (isDarkTheme) Color(0xFF818CF8) else Color(0xFF4F46E5),
                             modifier = Modifier.size(16.dp)
                         )
                     }
@@ -1984,20 +2073,20 @@ fun DashboardScreen(
                                     modifier = Modifier.weight(1f),
                                     horizontalAlignment = Alignment.CenterHorizontally
                                 ) {
-                                    Text(cfg.label, fontSize = 9.sp, fontWeight = FontWeight.Medium, color = Color(0xFF64748B))
+                                    Text(cfg.label, fontSize = 9.sp, fontWeight = FontWeight.Medium, color = if (isDarkTheme) Color(0xFFCBD5E1) else Color(0xFF64748B))
                                     Spacer(modifier = Modifier.height(4.dp))
                                     Row(
                                         verticalAlignment = Alignment.CenterVertically,
                                         modifier = Modifier
-                                            .border(1.dp, Color(0xFFCBD5E1), RoundedCornerShape(4.dp))
-                                            .background(Color(0xFFF8FAFC))
+                                            .border(1.dp, if (isDarkTheme) Color(0xFF334155) else Color(0xFFCBD5E1), RoundedCornerShape(4.dp))
+                                            .background(if (isDarkTheme) Color(0xFF334155) else Color(0xFFF8FAFC))
                                             .padding(horizontal = 2.dp, vertical = 2.dp)
                                     ) {
                                         Text(
                                             text = "${cfg.value} d", 
                                             fontSize = 9.sp, 
                                             fontWeight = FontWeight.Bold, 
-                                            color = Color(0xFF1E293B),
+                                            color = if (isDarkTheme) Color.White else Color(0xFF1E293B),
                                             modifier = Modifier.weight(1f),
                                             textAlign = TextAlign.Center
                                         )
@@ -2005,7 +2094,7 @@ fun DashboardScreen(
                                             Icon(
                                                 imageVector = Icons.Default.ArrowDropUp, 
                                                 contentDescription = "Lên",
-                                                tint = Color(0xFF4F46E5),
+                                                tint = if (isDarkTheme) Color(0xFF818CF8) else Color(0xFF4F46E5),
                                                 modifier = Modifier
                                                     .size(14.dp)
                                                     .clickable { cfg.onValueChange(cfg.value + 1) }
@@ -2013,7 +2102,7 @@ fun DashboardScreen(
                                             Icon(
                                                 imageVector = Icons.Default.ArrowDropDown, 
                                                 contentDescription = "Xuống",
-                                                tint = Color(0xFF64748B),
+                                                tint = if (isDarkTheme) Color(0xFFCBD5E1) else Color(0xFF64748B),
                                                 modifier = Modifier
                                                     .size(14.dp)
                                                     .clickable { if (cfg.value > 1) cfg.onValueChange(cfg.value - 1) }
@@ -2523,7 +2612,8 @@ fun DashboardScreen(
 fun StudyScheduleScreen(
     viewModel: WorkoutViewModel,
     topics: List<CategoryEntity>,
-    schedules: List<WorkoutScheduleEntity>
+    schedules: List<WorkoutScheduleEntity>,
+    isDarkTheme: Boolean
 ) {
     val context = LocalContext.current
     var showAddSchedule by remember { mutableStateOf(false) }
@@ -2552,12 +2642,12 @@ fun StudyScheduleScreen(
                             text = "Hẹn Giờ Ôn Tập",
                             fontSize = 20.sp,
                             fontWeight = FontWeight.Bold,
-                            color = Color(0xFF1E293B)
+                            color = if (isDarkTheme) Color.White else Color(0xFF1E293B)
                         )
                         Text(
                             text = "Thiết lập hệ thống báo thức nhắc nhở học bài.",
                             fontSize = 12.sp,
-                            color = Color(0xFF64748B)
+                            color = if (isDarkTheme) Color(0xFFCBD5E1) else Color(0xFF64748B)
                         )
                     }
                     Row(
@@ -2610,7 +2700,7 @@ fun StudyScheduleScreen(
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .background(Color.White, RoundedCornerShape(12.dp))
+                            .background(if (isDarkTheme) Color(0xFF1E293B) else Color.White, RoundedCornerShape(12.dp))
                             .padding(32.dp),
                         contentAlignment = Alignment.Center
                     ) {
@@ -2622,8 +2712,8 @@ fun StudyScheduleScreen(
                                 modifier = Modifier.size(48.dp)
                             )
                             Spacer(modifier = Modifier.height(10.dp))
-                            Text("Chưa cài nhắc lịch định kỳ", fontWeight = FontWeight.Bold, color = Color(0xFF475569))
-                            Text("Lịch hẹn sẽ đẩy đẩy thông báo đúng giờ", fontSize = 11.sp, color = Color.Gray)
+                            Text("Chưa cài nhắc lịch định kỳ", fontWeight = FontWeight.Bold, color = if (isDarkTheme) Color.White else Color(0xFF475569))
+                            Text("Lịch hẹn sẽ đẩy đẩy thông báo đúng giờ", fontSize = 11.sp, color = if (isDarkTheme) Color(0xFF94A3B8) else Color.Gray)
                         }
                     }
                 }
@@ -2631,8 +2721,8 @@ fun StudyScheduleScreen(
                 items(schedules, key = { it.id }) { schedule ->
                     Card(
                         shape = RoundedCornerShape(12.dp),
-                        colors = CardDefaults.cardColors(containerColor = Color.White),
-                        border = BorderStroke(1.dp, Color(0xFFE2E8F0))
+                        colors = CardDefaults.cardColors(containerColor = if (isDarkTheme) Color(0xFF1E293B) else Color.White),
+                        border = BorderStroke(1.dp, if (isDarkTheme) Color(0xFF334155) else Color(0xFFE2E8F0))
                     ) {
                         Column(
                             modifier = Modifier
@@ -2656,7 +2746,7 @@ fun StudyScheduleScreen(
                                         Text(
                                             text = schedule.label,
                                             fontSize = 11.sp,
-                                            color = Color.Gray,
+                                            color = if (isDarkTheme) Color(0xFFCBD5E1) else Color.Gray,
                                             fontWeight = FontWeight.Bold
                                         )
                                     }
@@ -2665,7 +2755,7 @@ fun StudyScheduleScreen(
                                         text = String.format("%02d:%02d", schedule.hour, schedule.minute),
                                         fontSize = 28.sp,
                                         fontWeight = FontWeight.ExtraBold,
-                                        color = Color(0xFF0F172A)
+                                        color = if (isDarkTheme) Color.White else Color(0xFF0F172A)
                                         )
                                 }
                                 
@@ -2680,7 +2770,7 @@ fun StudyScheduleScreen(
                             }
                             
                             Spacer(modifier = Modifier.height(8.dp))
-                            Divider(color = Color(0xFFF1F5F9))
+                            Divider(color = if (isDarkTheme) Color(0xFF334155) else Color(0xFFF1F5F9))
                             Spacer(modifier = Modifier.height(8.dp))
                             
                             Row(
@@ -2771,7 +2861,7 @@ fun StudyScheduleScreen(
             Dialog(onDismissRequest = { showAddSchedule = false }) {
                 Card(
                     shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color.White),
+                    colors = CardDefaults.cardColors(containerColor = if (isDarkTheme) Color(0xFF1E293B) else Color.White),
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(16.dp)
@@ -2784,7 +2874,7 @@ fun StudyScheduleScreen(
                             text = "Đặt Giờ Thông Báo Ôn Bài",
                             fontSize = 18.sp,
                             fontWeight = FontWeight.Bold,
-                            color = Color(0xFF1E293B)
+                            color = if (isDarkTheme) Color.White else Color(0xFF1E293B)
                         )
                         Spacer(modifier = Modifier.height(16.dp))
                         
@@ -2793,7 +2883,7 @@ fun StudyScheduleScreen(
                             text = "Chọn mốc liên kết chủ đề",
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,
-                            color = Color(0xFF475569)
+                            color = if (isDarkTheme) Color(0xFFCBD5E1) else Color(0xFF475569)
                         )
                         Spacer(modifier = Modifier.height(4.dp))
                         
@@ -2804,23 +2894,32 @@ fun StudyScheduleScreen(
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .border(1.dp, Color(0xFFCBD5E1), RoundedCornerShape(4.dp))
+                                    .border(1.dp, if (isDarkTheme) Color(0xFF334155) else Color(0xFFCBD5E1), RoundedCornerShape(4.dp))
                                     .clickable { dropdownExpanded = true }
                                     .padding(12.dp),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text(matchedTopic?.name ?: "Vui lòng chọn...", fontSize = 14.sp)
-                                Icon(imageVector = Icons.Default.ArrowDropDown, contentDescription = "Dropdown")
+                                Text(
+                                    text = matchedTopic?.name ?: "Vui lòng chọn...",
+                                    fontSize = 14.sp,
+                                    color = if (isDarkTheme) Color.White else Color(0xFF1E293B)
+                                )
+                                Icon(
+                                    imageVector = Icons.Default.ArrowDropDown,
+                                    contentDescription = "Dropdown",
+                                    tint = if (isDarkTheme) Color.White else Color.Black
+                                )
                             }
                             
                             DropdownMenu(
                                 expanded = dropdownExpanded,
-                                onDismissRequest = { dropdownExpanded = false }
+                                onDismissRequest = { dropdownExpanded = false },
+                                modifier = Modifier.background(if (isDarkTheme) Color(0xFF1E293B) else Color.White)
                             ) {
                                 topics.forEach { topic ->
                                     DropdownMenuItem(
-                                        text = { Text(topic.name) },
+                                        text = { Text(topic.name, color = if (isDarkTheme) Color.White else Color.Black) },
                                         onClick = {
                                             selectedTopicId = topic.id
                                             notificationLabel = "Báo ôn lịch " + topic.name
@@ -2838,13 +2937,13 @@ fun StudyScheduleScreen(
                             text = "Chọn giờ nhắc nhở",
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,
-                            color = Color(0xFF475569)
+                            color = if (isDarkTheme) Color(0xFFCBD5E1) else Color(0xFF475569)
                         )
                         Spacer(modifier = Modifier.height(4.dp))
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .border(1.dp, Color(0xFFCBD5E1), RoundedCornerShape(4.dp))
+                                .border(1.dp, if (isDarkTheme) Color(0xFF334155) else Color(0xFFCBD5E1), RoundedCornerShape(4.dp))
                                 .clickable {
                                     TimePickerDialog(
                                         context,
@@ -2865,7 +2964,7 @@ fun StudyScheduleScreen(
                                 text = String.format("%02d:%02d", hour, minute),
                                 fontSize = 16.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = Color(0xFF1E293B)
+                                color = if (isDarkTheme) Color.White else Color(0xFF1E293B)
                             )
                             Icon(imageVector = Icons.Default.AccessTime, contentDescription = "Chọn giờ", tint = Color(0xFF4F46E5))
                         }
@@ -2913,7 +3012,7 @@ fun StudyScheduleScreen(
             Dialog(onDismissRequest = { editingScheduleState = null }) {
                 Card(
                     shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color.White),
+                    colors = CardDefaults.cardColors(containerColor = if (isDarkTheme) Color(0xFF1E293B) else Color.White),
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(16.dp)
@@ -2926,7 +3025,7 @@ fun StudyScheduleScreen(
                             text = "Chỉnh Sửa Giờ Nhắc Nhở",
                             fontSize = 18.sp,
                             fontWeight = FontWeight.Bold,
-                            color = Color(0xFF1E293B)
+                            color = if (isDarkTheme) Color.White else Color(0xFF1E293B)
                         )
                         Spacer(modifier = Modifier.height(16.dp))
                         
@@ -2934,7 +3033,7 @@ fun StudyScheduleScreen(
                             text = "Chọn mốc liên kết chủ đề",
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,
-                            color = Color(0xFF475569)
+                            color = if (isDarkTheme) Color(0xFFCBD5E1) else Color(0xFF475569)
                         )
                         Spacer(modifier = Modifier.height(4.dp))
                         
@@ -2945,23 +3044,32 @@ fun StudyScheduleScreen(
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .border(1.dp, Color(0xFFCBD5E1), RoundedCornerShape(4.dp))
+                                    .border(1.dp, if (isDarkTheme) Color(0xFF334155) else Color(0xFFCBD5E1), RoundedCornerShape(4.dp))
                                     .clickable { dropdownExpanded = true }
                                     .padding(12.dp),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text(matchedTopic?.name ?: "Vui lòng chọn...", fontSize = 14.sp)
-                                Icon(imageVector = Icons.Default.ArrowDropDown, contentDescription = "Dropdown")
+                                Text(
+                                    text = matchedTopic?.name ?: "Vui lòng chọn...",
+                                    fontSize = 14.sp,
+                                    color = if (isDarkTheme) Color.White else Color(0xFF1E293B)
+                                )
+                                Icon(
+                                    imageVector = Icons.Default.ArrowDropDown,
+                                    contentDescription = "Dropdown",
+                                    tint = if (isDarkTheme) Color.White else Color.Black
+                                )
                             }
                             
                             DropdownMenu(
                                 expanded = dropdownExpanded,
-                                onDismissRequest = { dropdownExpanded = false }
+                                onDismissRequest = { dropdownExpanded = false },
+                                modifier = Modifier.background(if (isDarkTheme) Color(0xFF1E293B) else Color.White)
                             ) {
                                 topics.forEach { t ->
                                     DropdownMenuItem(
-                                        text = { Text(t.name) },
+                                        text = { Text(t.name, color = if (isDarkTheme) Color.White else Color.Black) },
                                         onClick = {
                                             editSelectedTopicId = t.id
                                             editNotificationLabel = "Báo ôn lịch " + t.name
@@ -2978,13 +3086,13 @@ fun StudyScheduleScreen(
                             text = "Chọn giờ nhắc nhở",
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,
-                            color = Color(0xFF475569)
+                            color = if (isDarkTheme) Color(0xFFCBD5E1) else Color(0xFF475569)
                         )
                         Spacer(modifier = Modifier.height(4.dp))
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .border(1.dp, Color(0xFFCBD5E1), RoundedCornerShape(4.dp))
+                                .border(1.dp, if (isDarkTheme) Color(0xFF334155) else Color(0xFFCBD5E1), RoundedCornerShape(4.dp))
                                 .clickable {
                                     TimePickerDialog(
                                         context,
@@ -3005,7 +3113,7 @@ fun StudyScheduleScreen(
                                 text = String.format("%02d:%02d", editHour, editMinute),
                                 fontSize = 16.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = Color(0xFF1E293B)
+                                color = if (isDarkTheme) Color.White else Color(0xFF1E293B)
                             )
                             Icon(imageVector = Icons.Default.AccessTime, contentDescription = "Chọn giờ", tint = Color(0xFF4F46E5))
                         }
@@ -3051,7 +3159,8 @@ fun StudyScheduleScreen(
 @Composable
 fun StudyHistoryScreen(
     viewModel: WorkoutViewModel,
-    logs: List<WorkoutLogEntity>
+    logs: List<WorkoutLogEntity>,
+    isDarkTheme: Boolean
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -3103,11 +3212,11 @@ fun StudyHistoryScreen(
         Color(0xFF14B8A6)  // Teal
     )
 
-    Scaffold { padding ->
+    Scaffold(containerColor = Color.Transparent) { padding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color(0xFFF8FAFC))
+                .background(Color.Transparent)
                 .padding(padding)
                 .padding(16.dp)
                 .verticalScroll(rememberScrollState()),
@@ -3125,7 +3234,7 @@ fun StudyHistoryScreen(
             Text(
                 text = "Hoàn thành bài ôn tập để nhận lượt quay và đổi lấy những phần thưởng động lực!",
                 fontSize = 12.sp,
-                color = Color(0xFF64748B),
+                color = if (isDarkTheme) Color(0xFFCBD5E1) else Color(0xFF64748B),
                 textAlign = TextAlign.Center,
                 modifier = Modifier.padding(horizontal = 12.dp)
             )
@@ -3133,8 +3242,8 @@ fun StudyHistoryScreen(
             // Available Spins Card
             Card(
                 shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.White),
-                border = BorderStroke(1.5.dp, Color(0xFFE2E8F0)),
+                colors = CardDefaults.cardColors(containerColor = if (isDarkTheme) Color(0xFF1E293B) else Color.White),
+                border = BorderStroke(1.5.dp, if (isDarkTheme) Color(0xFF334155) else Color(0xFFE2E8F0)),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Row(
@@ -3149,7 +3258,7 @@ fun StudyHistoryScreen(
                             text = "Lượt quay khả dụng của bạn",
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,
-                            color = Color(0xFF475569)
+                            color = if (isDarkTheme) Color.White else Color(0xFF475569)
                         )
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
@@ -3163,14 +3272,14 @@ fun StudyHistoryScreen(
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(12.dp))
-                            .background(Color(0xFFEEF2F6))
+                            .background(if (isDarkTheme) Color(0xFF334155) else Color(0xFFEEF2F6))
                             .padding(horizontal = 16.dp, vertical = 8.dp)
                     ) {
                         Text(
                             text = "$availableSpins lượt",
                             fontSize = 18.sp,
                             fontWeight = FontWeight.ExtraBold,
-                            color = Color(0xFF4F46E5)
+                            color = Color(0xFF6366F1)
                         )
                     }
                 }
@@ -3192,11 +3301,11 @@ fun StudyHistoryScreen(
                         
                         // Draw outer elegant shadow-border
                         drawCircle(
-                            color = Color(0xFFE2E8F0),
+                            color = if (isDarkTheme) Color(0xFF334155) else Color(0xFFE2E8F0),
                             radius = radius + 6.dp.toPx()
                         )
                         drawCircle(
-                            color = Color.White,
+                            color = if (isDarkTheme) Color(0xFF1E293B) else Color.White,
                             radius = radius + 2.dp.toPx()
                         )
                         
@@ -3238,7 +3347,7 @@ fun StudyHistoryScreen(
                         
                         // Center decorative pivot pin
                         drawCircle(
-                            color = Color.White,
+                            color = if (isDarkTheme) Color(0xFF1E293B) else Color.White,
                             radius = 20.dp.toPx(),
                             center = center
                         )
@@ -3333,14 +3442,14 @@ fun StudyHistoryScreen(
             }
             
             Spacer(modifier = Modifier.height(4.dp))
-            Divider(color = Color(0xFFE2E8F0))
+            Divider(color = if (isDarkTheme) Color(0xFF334155) else Color(0xFFE2E8F0))
             
             // --- MANAGE REWARDS SECTION ---
             Text(
                 text = "🛠️ QUẢN LÝ PHẦN THƯỞNG",
                 fontSize = 14.sp,
                 fontWeight = FontWeight.Bold,
-                color = Color(0xFF334155),
+                color = if (isDarkTheme) Color.White else Color(0xFF334155),
                 modifier = Modifier.align(Alignment.Start)
             )
             
@@ -3358,10 +3467,12 @@ fun StudyHistoryScreen(
                     shape = RoundedCornerShape(10.dp),
                     singleLine = true,
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = Color(0xFF1E293B),
-                        unfocusedTextColor = Color(0xFF1E293B),
+                        focusedTextColor = if (isDarkTheme) Color.White else Color(0xFF1E293B),
+                        unfocusedTextColor = if (isDarkTheme) Color.White else Color(0xFF1E293B),
+                        focusedContainerColor = if (isDarkTheme) Color(0xFF1E293B) else Color.White,
+                        unfocusedContainerColor = if (isDarkTheme) Color(0xFF1E293B) else Color.White,
                         focusedBorderColor = Color(0xFF4F46E5),
-                        unfocusedBorderColor = Color(0xFFCBD5E1)
+                        unfocusedBorderColor = if (isDarkTheme) Color(0xFF334155) else Color(0xFFCBD5E1)
                     )
                 )
                 
@@ -3391,8 +3502,8 @@ fun StudyHistoryScreen(
             // List of existing rewards
             Card(
                 shape = RoundedCornerShape(12.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.White),
-                border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                colors = CardDefaults.cardColors(containerColor = if (isDarkTheme) Color(0xFF1E293B) else Color.White),
+                border = BorderStroke(1.dp, if (isDarkTheme) Color(0xFF334155) else Color(0xFFE2E8F0)),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(
@@ -3403,7 +3514,7 @@ fun StudyHistoryScreen(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .background(if (index % 2 == 0) Color(0xFFF8FAFC) else Color.White, RoundedCornerShape(6.dp))
+                                .background(if (index % 2 == 0) (if (isDarkTheme) Color(0xFF0F172A) else Color(0xFFF8FAFC)) else (if (isDarkTheme) Color(0xFF1E293B) else Color.White), RoundedCornerShape(6.dp))
                                 .padding(horizontal = 12.dp, vertical = 8.dp),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
@@ -3422,7 +3533,7 @@ fun StudyHistoryScreen(
                                 Text(
                                     text = reward,
                                     fontSize = 13.sp,
-                                    color = Color(0xFF334155),
+                                    color = if (isDarkTheme) Color.White else Color(0xFF334155),
                                     fontWeight = FontWeight.Medium,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
@@ -3482,7 +3593,7 @@ fun StudyHistoryScreen(
         Dialog(onDismissRequest = { showCelebration = false }) {
             Card(
                 shape = RoundedCornerShape(24.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.White),
+                colors = CardDefaults.cardColors(containerColor = if (isDarkTheme) Color(0xFF1E293B) else Color.White),
                 border = BorderStroke(2.dp, Color(0xFFF59E0B)),
                 modifier = Modifier
                     .fillMaxWidth()
@@ -3504,7 +3615,7 @@ fun StudyHistoryScreen(
                         modifier = Modifier
                             .size(110.dp)
                             .clip(CircleShape)
-                            .background(Color(0xFFFEF3C7)),
+                            .background(if (isDarkTheme) Color(0xFF334155) else Color(0xFFFEF3C7)),
                         contentAlignment = Alignment.Center
                     ) {
                         Text("🎁", fontSize = 56.sp)
@@ -3513,15 +3624,15 @@ fun StudyHistoryScreen(
                     Text(
                         text = "Phần thưởng bạn nhận được là:",
                         fontSize = 13.sp,
-                        color = Color(0xFF64748B),
+                        color = if (isDarkTheme) Color(0xFFCBD5E1) else Color(0xFF64748B),
                         fontWeight = FontWeight.Medium
                     )
                     
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .background(Color(0xFFFFFBEB), RoundedCornerShape(12.dp))
-                            .border(1.dp, Color(0xFFFDE68A), RoundedCornerShape(12.dp))
+                            .background(if (isDarkTheme) Color(0xFF334155) else Color(0xFFFFFBEB), RoundedCornerShape(12.dp))
+                            .border(1.dp, if (isDarkTheme) Color(0xFF475569) else Color(0xFFFDE68A), RoundedCornerShape(12.dp))
                             .padding(horizontal = 16.dp, vertical = 12.dp),
                         contentAlignment = Alignment.Center
                     ) {
@@ -3529,7 +3640,7 @@ fun StudyHistoryScreen(
                             text = winnerName,
                             fontSize = 18.sp,
                             fontWeight = FontWeight.ExtraBold,
-                            color = Color(0xFFD97706),
+                            color = if (isDarkTheme) Color(0xFFFBBF24) else Color(0xFFD97706),
                             textAlign = TextAlign.Center
                         )
                     }
@@ -3561,8 +3672,8 @@ fun StudyHistoryScreen(
         Dialog(onDismissRequest = { editingRewardIndex = null }) {
             Card(
                 shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.White),
-                border = BorderStroke(1.5.dp, Color(0xFFE2E8F0)),
+                colors = CardDefaults.cardColors(containerColor = if (isDarkTheme) Color(0xFF1E293B) else Color.White),
+                border = BorderStroke(1.5.dp, if (isDarkTheme) Color(0xFF334155) else Color(0xFFE2E8F0)),
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(16.dp)
@@ -3576,13 +3687,13 @@ fun StudyHistoryScreen(
                         text = "✏️ Sửa Phần Thưởng",
                         fontSize = 18.sp,
                         fontWeight = FontWeight.Bold,
-                        color = Color(0xFF1E293B)
+                        color = if (isDarkTheme) Color.White else Color(0xFF1E293B)
                     )
                     
                     Text(
                         text = "Thay đổi tên phần thưởng tự chọn của bạn:",
                         fontSize = 13.sp,
-                        color = Color(0xFF64748B),
+                        color = if (isDarkTheme) Color(0xFFCBD5E1) else Color(0xFF64748B),
                         textAlign = TextAlign.Center
                     )
                     
@@ -3594,10 +3705,12 @@ fun StudyHistoryScreen(
                         shape = RoundedCornerShape(10.dp),
                         singleLine = true,
                         colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = Color(0xFF1E293B),
-                            unfocusedTextColor = Color(0xFF1E293B),
+                            focusedTextColor = if (isDarkTheme) Color.White else Color(0xFF1E293B),
+                            unfocusedTextColor = if (isDarkTheme) Color.White else Color(0xFF1E293B),
+                            focusedContainerColor = if (isDarkTheme) Color(0xFF1E293B) else Color.White,
+                            unfocusedContainerColor = if (isDarkTheme) Color(0xFF1E293B) else Color.White,
                             focusedBorderColor = Color(0xFF4F46E5),
-                            unfocusedBorderColor = Color(0xFFCBD5E1)
+                            unfocusedBorderColor = if (isDarkTheme) Color(0xFF334155) else Color(0xFFCBD5E1)
                         )
                     )
                     
@@ -3607,7 +3720,7 @@ fun StudyHistoryScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         TextButton(onClick = { editingRewardIndex = null }) {
-                            Text("Hủy", color = Color(0xFF64748B), fontWeight = FontWeight.Bold)
+                            Text("Hủy", color = if (isDarkTheme) Color(0xFFCBD5E1) else Color(0xFF64748B), fontWeight = FontWeight.Bold)
                         }
                         
                         Spacer(modifier = Modifier.width(8.dp))
@@ -3675,7 +3788,11 @@ fun SyncProfileScreen(
     isSyncing: Boolean,
     lastSyncTime: Long,
     cloudItemsCount: Int,
-    autoSync: Boolean
+    autoSync: Boolean,
+    isDarkTheme: Boolean,
+    onDarkThemeChanged: (Boolean) -> Unit,
+    backgroundImagePath: String?,
+    onBackgroundImageChanged: (String?) -> Unit
 ) {
     val context = LocalContext.current
 
@@ -3895,6 +4012,138 @@ fun SyncProfileScreen(
                                 checkedTrackColor = Color(0xFF4F46E5)
                             )
                         )
+                    }
+                }
+            }
+        }
+
+        // Personalization Settings Card
+        item {
+            Card(
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = if (isDarkTheme) Color(0xFF1E293B) else Color.White
+                ),
+                border = BorderStroke(
+                    1.dp,
+                    if (isDarkTheme) Color(0xFF334155) else Color(0xFFE2E8F0)
+                ),
+                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    Text(
+                        text = "🎨 Giao Diện & Cá Nhân Hóa",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (isDarkTheme) Color.White else Color(0xFF0F172A)
+                    )
+                    
+                    Divider(color = if (isDarkTheme) Color(0xFF334155) else Color(0xFFF1F5F9))
+                    
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text(
+                                text = "Chế độ nền tối", 
+                                fontSize = 14.sp, 
+                                fontWeight = FontWeight.Bold, 
+                                color = if (isDarkTheme) Color.White else Color(0xFF1E293B)
+                            )
+                            Text(
+                                text = "Chuyển giao diện sang tông màu tối thư thái", 
+                                fontSize = 11.sp, 
+                                color = Color.Gray
+                            )
+                        }
+                        Switch(
+                            checked = isDarkTheme,
+                            onCheckedChange = { onDarkThemeChanged(it) },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color.White,
+                                checkedTrackColor = Color(0xFF4F46E5)
+                            )
+                        )
+                    }
+                    
+                    Divider(color = if (isDarkTheme) Color(0xFF334155) else Color(0xFFF1F5F9))
+                    
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            text = "Ảnh nền cá nhân", 
+                            fontSize = 14.sp, 
+                            fontWeight = FontWeight.Bold, 
+                            color = if (isDarkTheme) Color.White else Color(0xFF1E293B)
+                        )
+                        Text(
+                            text = "Chọn hình ảnh làm nền mờ phía sau ứng dụng", 
+                            fontSize = 11.sp, 
+                            color = Color.Gray
+                        )
+                        
+                        val imagePickerLauncher = rememberLauncherForActivityResult(
+                            contract = ActivityResultContracts.GetContent()
+                        ) { uri ->
+                            if (uri != null) {
+                                val path = saveChosenBackgroundImage(context, uri)
+                                if (path != null) {
+                                    onBackgroundImageChanged(path)
+                                    Toast.makeText(context, "Đã cập nhật ảnh nền cá nhân thành công! ✨", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    Toast.makeText(context, "Lỗi khi sao chép ảnh nền.", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        }
+                        
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Button(
+                                onClick = { imagePickerLauncher.launch("image/*") },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4F46E5)),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Image, 
+                                    contentDescription = "Chọn ảnh nền", 
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Chọn Ảnh", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            }
+                            
+                            if (backgroundImagePath != null) {
+                                Button(
+                                    onClick = { 
+                                        onBackgroundImageChanged(null)
+                                        Toast.makeText(context, "Đã xóa ảnh nền cá nhân.", Toast.LENGTH_SHORT).show()
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEF4444)),
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Delete, 
+                                        contentDescription = "Xóa ảnh nền", 
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Xóa Ảnh", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
                     }
                 }
             }

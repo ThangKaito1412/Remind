@@ -80,6 +80,18 @@ class WorkoutViewModel(private val application: Application) : AndroidViewModel(
         // Check if DB is empty and prepopulate on background thread
         viewModelScope.launch {
             repository.checkAndPrepopulate()
+            
+            // Proactively verify and reschedule all active alarms on app startup
+            try {
+                val list = repository.getAllSchedulesList()
+                for (schedule in list) {
+                    if (schedule.isActive) {
+                        AlarmScheduler.scheduleWorkoutAlarm(application, schedule)
+                    }
+                }
+            } catch (e: Exception) {
+                // Ignore schedule refresh errors
+            }
         }
     }
 

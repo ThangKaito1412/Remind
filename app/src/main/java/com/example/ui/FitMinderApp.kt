@@ -2166,7 +2166,7 @@ fun DashboardScreen(
         Dialog(onDismissRequest = { selectedTopicForTimeline = null }) {
             Card(
                 shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFFF8FAFC)),
+                colors = CardDefaults.cardColors(containerColor = if (isDarkTheme) Color(0xFF1E293B) else Color(0xFFF8FAFC)),
                 modifier = Modifier
                     .fillMaxWidth()
                     .fillMaxHeight(0.88f)
@@ -2183,22 +2183,22 @@ fun DashboardScreen(
                                 text = topic.name,
                                 fontSize = 18.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = Color(0xFF0F172A),
+                                color = if (isDarkTheme) Color.White else Color(0xFF0F172A),
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
                             Text(
                                 text = "Dòng thời gian 5 cột mốc",
                                 fontSize = 11.sp,
-                                color = Color(0xFF64748B)
+                                color = if (isDarkTheme) Color(0xFFCBD5E1) else Color(0xFF64748B)
                             )
                         }
                         IconButton(onClick = { selectedTopicForTimeline = null }) {
-                            Icon(imageVector = Icons.Default.Close, contentDescription = "Đóng", tint = Color.Gray)
+                            Icon(imageVector = Icons.Default.Close, contentDescription = "Đóng", tint = if (isDarkTheme) Color.White else Color.Gray)
                         }
                     }
                     
-                    Divider(color = Color(0xFFE2E8F0), modifier = Modifier.padding(vertical = 10.dp))
+                    Divider(color = if (isDarkTheme) Color(0xFF334155) else Color(0xFFE2E8F0), modifier = Modifier.padding(vertical = 10.dp))
                     
                     // Stepper Vertical Steppes
                     Box(modifier = Modifier.weight(1f)) {
@@ -2213,25 +2213,49 @@ fun DashboardScreen(
                                     val isCompleted = index < topic.reviewsCompleted
                                     val isNext = index == topic.reviewsCompleted
                                     
-                                    val stepBg = when {
-                                        isCompleted -> Color(0xFFE8F5E9)
-                                        isNext -> Color(0xFFE3F2FD)
-                                        else -> Color.White
+                                    val stepBg = if (isDarkTheme) {
+                                        when {
+                                            isCompleted -> Color(0xFF064E3B)
+                                            isNext -> Color(0xFF1E3A8A)
+                                            else -> Color(0xFF334155)
+                                        }
+                                    } else {
+                                        when {
+                                            isCompleted -> Color(0xFFE8F5E9)
+                                            isNext -> Color(0xFFE3F2FD)
+                                            else -> Color.White
+                                        }
                                     }
-                                    val borderClr = when {
-                                        isCompleted -> Color(0xFF81C784)
-                                        isNext -> Color(0xFF64B5F6)
-                                        else -> Color(0xFFE2E8F0)
+                                    val borderClr = if (isDarkTheme) {
+                                        when {
+                                            isCompleted -> Color(0xFF059669)
+                                            isNext -> Color(0xFF3B82F6)
+                                            else -> Color(0xFF475569)
+                                        }
+                                    } else {
+                                        when {
+                                            isCompleted -> Color(0xFF81C784)
+                                            isNext -> Color(0xFF64B5F6)
+                                            else -> Color(0xFFE2E8F0)
+                                        }
                                     }
                                     val stepIcon = when {
                                         isCompleted -> Icons.Default.CheckCircle
                                         isNext -> Icons.Default.PlayCircle
                                         else -> Icons.Default.Schedule
                                     }
-                                    val stepIconColor = when {
-                                        isCompleted -> Color(0xFF2E7D32)
-                                        isNext -> Color(0xFF1565C0)
-                                        else -> Color(0xFF94A3B8)
+                                    val stepIconColor = if (isDarkTheme) {
+                                        when {
+                                            isCompleted -> Color(0xFF34D399)
+                                            isNext -> Color(0xFF60A5FA)
+                                            else -> Color(0xFF94A3B8)
+                                        }
+                                    } else {
+                                        when {
+                                            isCompleted -> Color(0xFF2E7D32)
+                                            isNext -> Color(0xFF1565C0)
+                                            else -> Color(0xFF94A3B8)
+                                        }
                                     }
                                     
                                     Box(
@@ -2263,14 +2287,14 @@ fun DashboardScreen(
                                                             text = "Lần ${index + 1} (+${days} ngày)",
                                                             fontSize = 12.sp,
                                                             fontWeight = FontWeight.Bold,
-                                                            color = Color(0xFF1E293B),
+                                                            color = if (isDarkTheme) Color.White else Color(0xFF1E293B),
                                                             maxLines = 1,
                                                             overflow = TextOverflow.Ellipsis
                                                         )
                                                         Text(
                                                             text = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(reviewDate),
                                                             fontSize = 11.sp,
-                                                            color = Color(0xFF64748B)
+                                                            color = if (isDarkTheme) Color(0xFFCBD5E1) else Color(0xFF64748B)
                                                         )
                                                     }
                                                 }
@@ -2281,10 +2305,10 @@ fun DashboardScreen(
                                                     Box(
                                                         modifier = Modifier
                                                             .clip(RoundedCornerShape(6.dp))
-                                                            .background(Color(0xFFC8E6C9))
+                                                            .background(if (isDarkTheme) Color(0xFF064E3B) else Color(0xFFC8E6C9))
                                                             .padding(horizontal = 8.dp, vertical = 2.dp)
                                                     ) {
-                                                        Text("Đã ôn", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFF2E7D32))
+                                                        Text("Đã ôn", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = if (isDarkTheme) Color(0xFF34D399) else Color(0xFF2E7D32))
                                                     }
                                                 } else {
                                                     Button(
@@ -2338,16 +2362,16 @@ fun DashboardScreen(
                                                 modifier = Modifier
                                                     .fillMaxWidth()
                                                     .height(60.dp),
-                                                placeholder = { Text("Ghi chú tiến độ, lỗi sai ôn tập...", fontSize = 11.sp) },
-                                                textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp),
+                                                placeholder = { Text("Ghi chú tiến độ, lỗi sai ôn tập...", fontSize = 11.sp, color = if (isDarkTheme) Color(0xFF94A3B8) else Color(0xFF64748B)) },
+                                                textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp, color = if (isDarkTheme) Color.White else Color(0xFF1E293B)),
                                                 shape = RoundedCornerShape(8.dp),
                                                 colors = OutlinedTextFieldDefaults.colors(
-                                                    focusedTextColor = Color(0xFF1E293B),
-                                                    unfocusedTextColor = Color(0xFF1E293B),
-                                                    focusedBorderColor = Color(0xFF4F46E5),
-                                                    unfocusedBorderColor = Color(0xFFCBD5E1),
-                                                    focusedContainerColor = Color.White,
-                                                    unfocusedContainerColor = Color.White
+                                                    focusedTextColor = if (isDarkTheme) Color.White else Color(0xFF1E293B),
+                                                    unfocusedTextColor = if (isDarkTheme) Color.White else Color(0xFF1E293B),
+                                                    focusedBorderColor = if (isDarkTheme) Color(0xFF818CF8) else Color(0xFF4F46E5),
+                                                    unfocusedBorderColor = if (isDarkTheme) Color(0xFF475569) else Color(0xFFCBD5E1),
+                                                    focusedContainerColor = if (isDarkTheme) Color(0xFF1E293B) else Color.White,
+                                                    unfocusedContainerColor = if (isDarkTheme) Color(0xFF1E293B) else Color.White
                                                 )
                                             )
                                             

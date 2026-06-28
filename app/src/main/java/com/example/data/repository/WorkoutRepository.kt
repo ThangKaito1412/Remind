@@ -84,6 +84,9 @@ class WorkoutRepository(
     suspend fun clearAllSchedules() = withContext(Dispatchers.IO) {
         workoutDao.clearAllSchedules()
     }
+    suspend fun getAllSchedulesList(): List<WorkoutScheduleEntity> = withContext(Dispatchers.IO) {
+        workoutDao.getAllSchedulesList()
+    }
 
     // --- Log DB Operations ---
     suspend fun insertLog(log: WorkoutLogEntity): Long = withContext(Dispatchers.IO) {

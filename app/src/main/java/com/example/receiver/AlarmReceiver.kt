@@ -86,6 +86,23 @@ class AlarmReceiver : BroadcastReceiver() {
             return
         }
         
+        val scheduleId = intent.getLongExtra("SCHEDULE_ID", -1L)
+        if (scheduleId != -1L) {
+            val database = WorkoutDatabase.getDatabase(context)
+            val dao = database.workoutDao()
+            CoroutineScope(Dispatchers.IO).launch {
+                try {
+                    val schedule = dao.getScheduleById(scheduleId)
+                    if (schedule != null && schedule.isActive) {
+                        AlarmScheduler.scheduleWorkoutAlarm(context, schedule)
+                        Log.d("AlarmReceiver", "Rescheduled active alarm for ${schedule.categoryName} (ID: ${schedule.id}) for tomorrow.")
+                    }
+                } catch (e: Exception) {
+                    Log.e("AlarmReceiver", "Failed to reschedule alarm ID $scheduleId", e)
+                }
+            }
+        }
+
         try {
             val notificationHelper = NotificationHelper(context)
             notificationHelper.showWorkoutReminder(categoryName, scheduleLabel, categoryId)

@@ -83,26 +83,85 @@ fun saveChosenBackgroundImage(context: Context, uri: Uri): String? {
 }
 
 fun getIntervalDaysForCategory(topic: CategoryEntity, index: Int): Int {
-    return when (index) {
-        0 -> topic.interval1
-        1 -> topic.interval2
-        2 -> topic.interval3
-        3 -> topic.interval4
-        4 -> topic.interval5
-        else -> 30
+    return when (topic.intervalType) {
+        "every_day" -> {
+            index
+        }
+        "every_n_days" -> {
+            val n = if (topic.everyNDays > 0) topic.everyNDays else 1
+            index * n
+        }
+        "every_n_hours" -> {
+            val n = if (topic.everyNDays > 0) topic.everyNDays else 1
+            index * n
+        }
+        "specific_date" -> {
+            topic.interval1
+        }
+        else -> { // "5_times"
+            when (index) {
+                0 -> topic.interval1
+                1 -> topic.interval2
+                2 -> topic.interval3
+                3 -> topic.interval4
+                4 -> topic.interval5
+                else -> 30
+            }
+        }
+    }
+}
+
+fun isTopicFullyCompleted(topic: CategoryEntity): Boolean {
+    return when (topic.intervalType) {
+        "specific_date" -> topic.reviewsCompleted >= 1
+        "every_day", "every_n_days", "every_n_hours" -> false
+        else -> topic.reviewsCompleted >= 5
     }
 }
 
 fun calculateReviewDate(topic: CategoryEntity, index: Int): Date {
-    val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+    val sdf = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault())
+    val timePart = topic.reviewTime.ifEmpty { "08:00" }
+    val dateString = "${topic.startDate} $timePart"
     val baseDate = try {
-        sdf.parse(topic.startDate) ?: Date()
+        sdf.parse(dateString) ?: Date()
     } catch (e: Exception) {
-        Date()
+        val fallbackSdf = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+        try {
+            fallbackSdf.parse(topic.startDate) ?: Date()
+        } catch (ex: Exception) {
+            Date()
+        }
     }
     val cal = Calendar.getInstance().apply {
         time = baseDate
-        add(Calendar.DAY_OF_YEAR, getIntervalDaysForCategory(topic, index))
+    }
+    when (topic.intervalType) {
+        "every_day" -> {
+            cal.add(Calendar.DAY_OF_YEAR, index)
+        }
+        "every_n_days" -> {
+            val n = if (topic.everyNDays > 0) topic.everyNDays else 1
+            cal.add(Calendar.DAY_OF_YEAR, index * n)
+        }
+        "every_n_hours" -> {
+            val n = if (topic.everyNDays > 0) topic.everyNDays else 1
+            cal.add(Calendar.HOUR_OF_DAY, index * n)
+        }
+        "specific_date" -> {
+            cal.add(Calendar.DAY_OF_YEAR, topic.interval1)
+        }
+        else -> { // "5_times"
+            val days = when (index) {
+                0 -> topic.interval1
+                1 -> topic.interval2
+                2 -> topic.interval3
+                3 -> topic.interval4
+                4 -> topic.interval5
+                else -> 30
+            }
+            cal.add(Calendar.DAY_OF_YEAR, days)
+        }
     }
     return cal.time
 }
@@ -125,12 +184,12 @@ data class ReviewStatus(
 )
 
 fun getTopicStatus(topic: CategoryEntity): ReviewStatus {
-    if (topic.reviewsCompleted >= 5) {
+    if (isTopicFullyCompleted(topic)) {
         return ReviewStatus(
             text = "Đã hoàn thành!",
             badgeColor = Color(0xFFE8F5E9),
             textColor = Color(0xFF2E7D32),
-            relativeText = "Đã ôn tập đủ 5/5 lần",
+            relativeText = if (topic.intervalType == "specific_date") "Đã hoàn thành nhắc nhở" else "Đã ôn tập đủ 5/5 lần",
             isDueToday = false,
             isOverdue = false,
             isCompleted = true
@@ -138,6 +197,43 @@ fun getTopicStatus(topic: CategoryEntity): ReviewStatus {
     }
     
     val nextReviewDate = calculateReviewDate(topic, topic.reviewsCompleted)
+    
+    if (topic.intervalType == "every_n_hours") {
+        val nowMs = System.currentTimeMillis()
+        val diffMs = nextReviewDate.time - nowMs
+        val nextNum = topic.reviewsCompleted + 1
+        
+        return when {
+            diffMs <= 0 -> {
+                val isOverdue = kotlin.math.abs(diffMs) > (1000 * 60 * 60)
+                val diffHours = kotlin.math.abs(diffMs / (1000 * 60 * 60)).toInt()
+                ReviewStatus(
+                    text = if (isOverdue) "Trễ hạn ôn tập!" else "Ôn tập ngay bây giờ!",
+                    badgeColor = if (isOverdue) Color(0xFFFFF3E0) else Color(0xFFFFEBEE),
+                    textColor = if (isOverdue) Color(0xFFEF6C00) else Color(0xFFC62828),
+                    relativeText = if (isOverdue) "Trễ $diffHours giờ" else "Đang đến giờ ôn",
+                    isDueToday = !isOverdue,
+                    isOverdue = isOverdue,
+                    isCompleted = false
+                )
+            }
+            else -> {
+                val diffHours = (diffMs / (1000 * 60 * 60)).toInt()
+                val displayStr = if (diffHours > 0) "Còn $diffHours giờ" else "Còn ít hơn 1 giờ"
+                ReviewStatus(
+                    text = displayStr,
+                    badgeColor = Color(0xFFE3F2FD),
+                    textColor = Color(0xFF1565C0),
+                    relativeText = "Ôn lúc " + SimpleDateFormat("HH:mm dd/MM/yyyy", Locale.getDefault()).format(nextReviewDate),
+                    isDueToday = false,
+                    isOverdue = false,
+                    isCompleted = false,
+                    daysRemaining = 0
+                )
+            }
+        }
+    }
+    
     val todayCal = Calendar.getInstance().apply {
         set(Calendar.HOUR_OF_DAY, 0)
         set(Calendar.MINUTE, 0)
@@ -158,8 +254,13 @@ fun getTopicStatus(topic: CategoryEntity): ReviewStatus {
     
     return when {
         diffDays == 0 -> {
+            val textStr = when (topic.intervalType) {
+                "specific_date" -> "Hôm nay nhắc nhở!"
+                "every_day", "every_n_days" -> "Ôn tập hôm nay!"
+                else -> "Ôn tập hôm nay! (Lần $nextNum)"
+            }
             ReviewStatus(
-                text = "Ôn tập hôm nay! (Lần $nextNum)",
+                text = textStr,
                 badgeColor = Color(0xFFFFEBEE),
                 textColor = Color(0xFFC62828),
                 relativeText = "Hạn chót hôm nay",
@@ -169,8 +270,13 @@ fun getTopicStatus(topic: CategoryEntity): ReviewStatus {
             )
         }
         diffDays < 0 -> {
+            val textStr = when (topic.intervalType) {
+                "specific_date" -> "Trễ hạn nhắc nhở!"
+                "every_day", "every_n_days" -> "Trễ hạn ôn tập!"
+                else -> "Trễ hạn! (Lần $nextNum)"
+            }
             ReviewStatus(
-                text = "Trễ hạn! (Lần $nextNum)",
+                text = textStr,
                 badgeColor = Color(0xFFFFF3E0),
                 textColor = Color(0xFFEF6C00),
                 relativeText = "Trễ ${kotlin.math.abs(diffDays)} ngày",
@@ -180,8 +286,13 @@ fun getTopicStatus(topic: CategoryEntity): ReviewStatus {
             )
         }
         else -> {
+            val textStr = when (topic.intervalType) {
+                "specific_date" -> "Còn $diffDays ngày"
+                "every_day", "every_n_days" -> "Còn $diffDays ngày"
+                else -> "Còn $diffDays ngày (Lần $nextNum)"
+            }
             ReviewStatus(
-                text = "Còn $diffDays ngày (Lần $nextNum)",
+                text = textStr,
                 badgeColor = Color(0xFFE3F2FD),
                 textColor = Color(0xFF1565C0),
                 relativeText = "Ôn ngày " + SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(nextReviewDate),
@@ -402,8 +513,8 @@ fun FitMinderApp(
         Dialog(onDismissRequest = { snoozeTopicId = null }) {
             Card(
                 shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.White),
-                border = BorderStroke(1.5.dp, Color(0xFFE2E8F0)),
+                colors = CardDefaults.cardColors(containerColor = if (isDarkTheme) Color(0xFF1E293B) else Color.White),
+                border = BorderStroke(1.5.dp, if (isDarkTheme) Color(0xFF334155) else Color(0xFFE2E8F0)),
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(16.dp)
@@ -417,13 +528,13 @@ fun FitMinderApp(
                         text = "⏰ Nhắc Nhở Sau",
                         fontSize = 18.sp,
                         fontWeight = FontWeight.ExtraBold,
-                        color = Color(0xFF1E293B)
+                        color = if (isDarkTheme) Color.White else Color(0xFF1E293B)
                     )
                     
                     Text(
                         text = "Chọn thời gian nhắc lại cho bài tập '${snoozeTopicName}':",
                         fontSize = 13.sp,
-                        color = Color(0xFF64748B),
+                        color = if (isDarkTheme) Color(0xFF94A3B8) else Color(0xFF64748B),
                         textAlign = TextAlign.Center
                     )
                     
@@ -467,7 +578,7 @@ fun FitMinderApp(
                     
                     // Custom minutes input option
                     Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text("Hoặc nhập số phút tùy chỉnh:", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF475569))
+                        Text("Hoặc nhập số phút tùy chỉnh:", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = if (isDarkTheme) Color(0xFF94A3B8) else Color(0xFF475569))
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -481,10 +592,10 @@ fun FitMinderApp(
                                 shape = RoundedCornerShape(10.dp),
                                 singleLine = true,
                                 colors = OutlinedTextFieldDefaults.colors(
-                                    focusedTextColor = Color(0xFF1E293B),
-                                    unfocusedTextColor = Color(0xFF1E293B),
+                                    focusedTextColor = if (isDarkTheme) Color.White else Color(0xFF1E293B),
+                                    unfocusedTextColor = if (isDarkTheme) Color.White else Color(0xFF1E293B),
                                     focusedBorderColor = Color(0xFF4F46E5),
-                                    unfocusedBorderColor = Color(0xFFCBD5E1)
+                                    unfocusedBorderColor = if (isDarkTheme) Color(0xFF475569) else Color(0xFFCBD5E1)
                                 )
                             )
                             
@@ -587,7 +698,7 @@ fun DashboardScreen(
 
     // Determine next topic awaiting review
     val nextReviewTopic = remember(topics) {
-        topics.filter { it.reviewsCompleted < 5 }
+        topics.filter { !isTopicFullyCompleted(it) }
             .minByOrNull { calculateReviewDate(it, it.reviewsCompleted).time }
     }
 
@@ -624,7 +735,7 @@ fun DashboardScreen(
                 }
             }
             3 -> { // Đã hoàn thành (5/5 times)
-                list.filter { it.reviewsCompleted >= 5 }
+                list.filter { isTopicFullyCompleted(it) }
             }
             else -> list // Tất cả
         }
@@ -786,16 +897,28 @@ fun DashboardScreen(
                                     }
                                     Spacer(modifier = Modifier.width(8.dp))
                                     Text(
-                                        text = "Lần ôn tiếp theo: Lần ${nextReviewTopic.reviewsCompleted + 1}",
+                                        text = when (nextReviewTopic.intervalType) {
+                                            "specific_date" -> "Lần nhắc nhở duy nhất"
+                                            "every_day" -> "Lần ôn tiếp theo: Ngày ${nextReviewTopic.reviewsCompleted + 1}"
+                                            "every_n_days" -> "Lần ôn tiếp theo: Chu kỳ ${nextReviewTopic.reviewsCompleted + 1}"
+                                            "every_n_hours" -> "Lần ôn tiếp theo: Lần ${nextReviewTopic.reviewsCompleted + 1}"
+                                            else -> "Lần ôn tiếp theo: Lần ${nextReviewTopic.reviewsCompleted + 1}"
+                                        },
                                         fontSize = 12.sp,
                                         color = if (isDarkTheme) Color(0xFF94A3B8) else Color(0xFF64748B)
                                     )
                                 }
                             }
                             
+                            Spacer(modifier = Modifier.width(6.dp))
+                            
                             Button(
                                 onClick = {
-                                    val nextCompleted = (nextReviewTopic.reviewsCompleted + 1).coerceAtMost(5)
+                                    val nextCompleted = when (nextReviewTopic.intervalType) {
+                                        "specific_date" -> (nextReviewTopic.reviewsCompleted + 1).coerceAtMost(1)
+                                        "every_day", "every_n_days", "every_n_hours" -> nextReviewTopic.reviewsCompleted + 1
+                                        else -> (nextReviewTopic.reviewsCompleted + 1).coerceAtMost(5)
+                                    }
                                     viewModel.updateTopicProgress(nextReviewTopic.id, nextCompleted)
                                     viewModel.logCompletedWorkout(
                                         exerciseId = nextReviewTopic.id,
@@ -1181,8 +1304,15 @@ fun DashboardScreen(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
+                            val progressText = when (topic.intervalType) {
+                                "specific_date" -> "Tiến độ lặp lại: ${topic.reviewsCompleted}/1 lần nhắc nhở"
+                                "every_day" -> "Lặp lại hằng ngày: Đã ôn ${topic.reviewsCompleted} lần"
+                                "every_n_days" -> "Lặp lại sau mỗi ${topic.everyNDays} ngày: Đã ôn ${topic.reviewsCompleted} lần"
+                                "every_n_hours" -> "Lặp lại sau mỗi ${topic.everyNDays} giờ: Đã ôn ${topic.reviewsCompleted} lần"
+                                else -> "Tiến độ lặp lại: ${topic.reviewsCompleted}/5 lần ôn tập"
+                            }
                             Text(
-                                text = "Tiến độ lặp lại: ${topic.reviewsCompleted}/5 lần ôn tập",
+                                text = progressText,
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = if (isDarkTheme) Color(0xFFCBD5E1) else Color(0xFF475569)
@@ -1198,13 +1328,31 @@ fun DashboardScreen(
                         Spacer(modifier = Modifier.height(6.dp))
                         
                         // Styled progress bar
+                        val progressValue = when (topic.intervalType) {
+                            "specific_date" -> topic.reviewsCompleted / 1.0f
+                            "every_day", "every_n_days" -> if (status.daysRemaining > 0) 1.0f else 0.0f
+                            "every_n_hours" -> {
+                                val nextReview = calculateReviewDate(topic, topic.reviewsCompleted)
+                                if (nextReview.time > System.currentTimeMillis()) 1.0f else 0.0f
+                            }
+                            else -> topic.reviewsCompleted / 5.0f
+                        }
+                        val isProgressCompleted = when (topic.intervalType) {
+                            "specific_date" -> topic.reviewsCompleted >= 1
+                            "every_day", "every_n_days" -> status.daysRemaining > 0
+                            "every_n_hours" -> {
+                                val nextReview = calculateReviewDate(topic, topic.reviewsCompleted)
+                                nextReview.time > System.currentTimeMillis()
+                            }
+                            else -> topic.reviewsCompleted >= 5
+                        }
                         LinearProgressIndicator(
-                            progress = { topic.reviewsCompleted / 5.0f },
+                            progress = { progressValue },
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(8.dp)
                                 .clip(RoundedCornerShape(4.dp)),
-                            color = if (topic.reviewsCompleted >= 5) Color(0xFF10B981) else Color(0xFF4F46E5),
+                            color = if (isProgressCompleted) Color(0xFF10B981) else Color(0xFF4F46E5),
                             trackColor = if (isDarkTheme) Color(0xFF334155) else Color(0xFFE2E8F0)
                         )
                         
@@ -1617,6 +1765,70 @@ fun DashboardScreen(
                             }
                         }
 
+                        // Option: Sau mỗi n giờ
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { intervalType = "every_n_hours" },
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(
+                                selected = (intervalType == "every_n_hours"),
+                                onClick = { intervalType = "every_n_hours" },
+                                colors = RadioButtonDefaults.colors(selectedColor = Color(0xFF4F46E5))
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Column {
+                                Text("Sau mỗi n giờ", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = if (isDarkTheme) Color.White else Color(0xFF1E293B))
+                                Text("Lặp lại định kỳ sau mỗi n giờ", fontSize = 11.sp, color = if (isDarkTheme) Color(0xFFCBD5E1) else Color(0xFF64748B))
+                            }
+                        }
+                        
+                        if (intervalType == "every_n_hours") {
+                            Row(
+                                modifier = Modifier
+                                    .padding(start = 36.dp)
+                                    .fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("Số giờ (n): ", fontSize = 12.sp, color = if (isDarkTheme) Color.White else Color(0xFF475569))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier
+                                        .border(1.dp, if (isDarkTheme) Color(0xFF334155) else Color(0xFFCBD5E1), RoundedCornerShape(4.dp))
+                                        .background(if (isDarkTheme) Color(0xFF0F172A) else Color.White)
+                                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                                ) {
+                                    Text(
+                                        text = "$everyNDays giờ", 
+                                        fontSize = 12.sp, 
+                                        fontWeight = FontWeight.Bold, 
+                                        color = if (isDarkTheme) Color.White else Color(0xFF1E293B)
+                                    )
+                                    Spacer(modifier = Modifier.width(16.dp))
+                                    Column {
+                                        Icon(
+                                            imageVector = Icons.Default.ArrowDropUp, 
+                                            contentDescription = "Tăng",
+                                            tint = if (isDarkTheme) Color(0xFF818CF8) else Color(0xFF4F46E5),
+                                            modifier = Modifier
+                                                .size(16.dp)
+                                                .clickable { everyNDays += 1 }
+                                        )
+                                        Icon(
+                                            imageVector = Icons.Default.ArrowDropDown, 
+                                            contentDescription = "Giảm",
+                                            tint = if (isDarkTheme) Color(0xFFCBD5E1) else Color(0xFF64748B),
+                                            modifier = Modifier
+                                                .size(16.dp)
+                                                .clickable { if (everyNDays > 1) everyNDays -= 1 }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
                         // Option 4: Nhắc vào 1 ngày nhất định theo lịch
                         Row(
                             modifier = Modifier
@@ -1829,7 +2041,9 @@ fun DashboardScreen(
                                     finalInt3, 
                                     finalInt4, 
                                     finalInt5,
-                                    customNotificationNote.trim()
+                                    customNotificationNote.trim(),
+                                    intervalType,
+                                    everyNDays
                                 )
                                 showAddTopicDialog = false
                                 Toast.makeText(context, "Thêm chủ đề lặp thành công!", Toast.LENGTH_SHORT).show()
@@ -2188,7 +2402,7 @@ fun DashboardScreen(
                                 overflow = TextOverflow.Ellipsis
                             )
                             Text(
-                                text = "Dòng thời gian 5 cột mốc",
+                                text = if (topic.intervalType == "5_times") "Dòng thời gian 5 cột mốc" else "Dòng thời gian nhắc nhở",
                                 fontSize = 11.sp,
                                 color = if (isDarkTheme) Color(0xFFCBD5E1) else Color(0xFF64748B)
                             )
@@ -2206,149 +2420,177 @@ fun DashboardScreen(
                             modifier = Modifier.fillMaxSize(),
                             verticalArrangement = Arrangement.spacedBy(16.dp)
                         ) {
-                            val intervals = listOf(topic.interval1, topic.interval2, topic.interval3, topic.interval4, topic.interval5)
-                            intervals.forEachIndexed { index, days ->
+                            val indices = if (topic.intervalType == "5_times") {
+                                (0..4).toList()
+                            } else {
+                                if (isTopicFullyCompleted(topic)) {
+                                    listOf(topic.reviewsCompleted - 1)
+                                } else {
+                                    listOf(topic.reviewsCompleted)
+                                }
+                            }.filter { it >= 0 }
+                            indices.forEach { index ->
                                 item {
-                                    val reviewDate = calculateReviewDate(topic, index)
-                                    val isCompleted = index < topic.reviewsCompleted
-                                    val isNext = index == topic.reviewsCompleted
-                                    
-                                    val stepBg = if (isDarkTheme) {
-                                        when {
-                                            isCompleted -> Color(0xFF064E3B)
-                                            isNext -> Color(0xFF1E3A8A)
-                                            else -> Color(0xFF334155)
+                                        val days = getIntervalDaysForCategory(topic, index)
+                                        val reviewDate = calculateReviewDate(topic, index)
+                                        val isCompleted = index < topic.reviewsCompleted
+                                        val isNext = index == topic.reviewsCompleted
+                                        
+                                        val stepBg = if (isDarkTheme) {
+                                            when {
+                                                isCompleted -> Color(0xFF064E3B)
+                                                isNext -> Color(0xFF1E3A8A)
+                                                else -> Color(0xFF334155)
+                                            }
+                                        } else {
+                                            when {
+                                                isCompleted -> Color(0xFFE8F5E9)
+                                                isNext -> Color(0xFFE3F2FD)
+                                                else -> Color.White
+                                            }
                                         }
-                                    } else {
-                                        when {
-                                            isCompleted -> Color(0xFFE8F5E9)
-                                            isNext -> Color(0xFFE3F2FD)
-                                            else -> Color.White
+                                        val borderClr = if (isDarkTheme) {
+                                            when {
+                                                isCompleted -> Color(0xFF059669)
+                                                isNext -> Color(0xFF3B82F6)
+                                                else -> Color(0xFF475569)
+                                            }
+                                        } else {
+                                            when {
+                                                isCompleted -> Color(0xFF81C784)
+                                                isNext -> Color(0xFF64B5F6)
+                                                else -> Color(0xFFE2E8F0)
+                                            }
                                         }
-                                    }
-                                    val borderClr = if (isDarkTheme) {
-                                        when {
-                                            isCompleted -> Color(0xFF059669)
-                                            isNext -> Color(0xFF3B82F6)
-                                            else -> Color(0xFF475569)
+                                        val stepIcon = when {
+                                            isCompleted -> Icons.Default.CheckCircle
+                                            isNext -> Icons.Default.PlayCircle
+                                            else -> Icons.Default.Schedule
                                         }
-                                    } else {
-                                        when {
-                                            isCompleted -> Color(0xFF81C784)
-                                            isNext -> Color(0xFF64B5F6)
-                                            else -> Color(0xFFE2E8F0)
+                                        val stepIconColor = if (isDarkTheme) {
+                                            when {
+                                                isCompleted -> Color(0xFF34D399)
+                                                isNext -> Color(0xFF60A5FA)
+                                                else -> Color(0xFF94A3B8)
+                                            }
+                                        } else {
+                                            when {
+                                                isCompleted -> Color(0xFF2E7D32)
+                                                isNext -> Color(0xFF1565C0)
+                                                else -> Color(0xFF94A3B8)
+                                            }
                                         }
-                                    }
-                                    val stepIcon = when {
-                                        isCompleted -> Icons.Default.CheckCircle
-                                        isNext -> Icons.Default.PlayCircle
-                                        else -> Icons.Default.Schedule
-                                    }
-                                    val stepIconColor = if (isDarkTheme) {
-                                        when {
-                                            isCompleted -> Color(0xFF34D399)
-                                            isNext -> Color(0xFF60A5FA)
-                                            else -> Color(0xFF94A3B8)
-                                        }
-                                    } else {
-                                        when {
-                                            isCompleted -> Color(0xFF2E7D32)
-                                            isNext -> Color(0xFF1565C0)
-                                            else -> Color(0xFF94A3B8)
-                                        }
-                                    }
-                                    
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .background(stepBg, RoundedCornerShape(12.dp))
-                                            .border(1.dp, borderClr, RoundedCornerShape(12.dp))
-                                            .padding(14.dp)
-                                    ) {
-                                        Column {
-                                            Row(
-                                                modifier = Modifier.fillMaxWidth(),
-                                                horizontalArrangement = Arrangement.SpaceBetween,
-                                                verticalAlignment = Alignment.CenterVertically
-                                            ) {
+                                        
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .background(stepBg, RoundedCornerShape(12.dp))
+                                                .border(1.dp, borderClr, RoundedCornerShape(12.dp))
+                                                .padding(14.dp)
+                                        ) {
+                                            Column {
                                                 Row(
-                                                    modifier = Modifier.weight(1f),
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    horizontalArrangement = Arrangement.SpaceBetween,
                                                     verticalAlignment = Alignment.CenterVertically
                                                 ) {
-                                                    Icon(
-                                                        imageVector = stepIcon,
-                                                        contentDescription = "Step",
-                                                        tint = stepIconColor,
-                                                        modifier = Modifier.size(22.dp)
-                                                    )
-                                                    Spacer(modifier = Modifier.width(8.dp))
-                                                    Column {
-                                                        Text(
-                                                            text = "Lần ${index + 1} (+${days} ngày)",
-                                                            fontSize = 12.sp,
-                                                            fontWeight = FontWeight.Bold,
-                                                            color = if (isDarkTheme) Color.White else Color(0xFF1E293B),
-                                                            maxLines = 1,
-                                                            overflow = TextOverflow.Ellipsis
-                                                        )
-                                                        Text(
-                                                            text = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(reviewDate),
-                                                            fontSize = 11.sp,
-                                                            color = if (isDarkTheme) Color(0xFFCBD5E1) else Color(0xFF64748B)
-                                                        )
-                                                    }
-                                                }
-                                                
-                                                Spacer(modifier = Modifier.width(6.dp))
-                                                
-                                                if (isCompleted) {
-                                                    Box(
-                                                        modifier = Modifier
-                                                            .clip(RoundedCornerShape(6.dp))
-                                                            .background(if (isDarkTheme) Color(0xFF064E3B) else Color(0xFFC8E6C9))
-                                                            .padding(horizontal = 8.dp, vertical = 2.dp)
+                                                    Row(
+                                                        modifier = Modifier.weight(1f),
+                                                        verticalAlignment = Alignment.CenterVertically
                                                     ) {
-                                                        Text("Đã ôn", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = if (isDarkTheme) Color(0xFF34D399) else Color(0xFF2E7D32))
-                                                    }
-                                                } else {
-                                                    Button(
-                                                        onClick = {
-                                                            // Increment reviewsCompleted & log completion history
-                                                            val nextCompleted = index + 1
-                                                            viewModel.updateTopicProgress(topic.id, nextCompleted)
-                                                            viewModel.logCompletedWorkout(
-                                                                exerciseId = topic.id,
-                                                                exerciseName = topic.name,
-                                                                categoryName = "Ôn Tập Lặp Lại",
-                                                                note = tempNotesList.getOrElse(index) { "" },
-                                                                rating = 3,
-                                                                durationSeconds = 600
+                                                        Icon(
+                                                            imageVector = stepIcon,
+                                                            contentDescription = "Step",
+                                                            tint = stepIconColor,
+                                                            modifier = Modifier.size(22.dp)
+                                                        )
+                                                        Spacer(modifier = Modifier.width(8.dp))
+                                                        Column {
+                                                            val stepLabel = when (topic.intervalType) {
+                                                                "specific_date" -> "Nhắc nhở ngày hẹn"
+                                                                "every_day" -> "Ngày ôn thứ ${index + 1} (+${days} ngày)"
+                                                                "every_n_days" -> "Đợt ôn thứ ${index + 1} (+${days} ngày)"
+                                                                "every_n_hours" -> "Đợt ôn thứ ${index + 1} (+${days} giờ)"
+                                                                else -> "Lần ${index + 1} (+${days} ngày)"
+                                                            }
+                                                            Text(
+                                                                text = stepLabel,
+                                                                fontSize = 12.sp,
+                                                                fontWeight = FontWeight.Bold,
+                                                                color = if (isDarkTheme) Color.White else Color(0xFF1E293B),
+                                                                maxLines = 1,
+                                                                overflow = TextOverflow.Ellipsis
                                                             )
-                                                            // Award 1 lucky spin
-                                                            val prefs = context.getSharedPreferences("fitminder_prefs", Context.MODE_PRIVATE)
-                                                            val currentSpins = prefs.getInt("available_spins", 0)
-                                                            prefs.edit().putInt("available_spins", currentSpins + 1).apply()
-                                                            
-                                                            Toast.makeText(context, "Đã ghi nhận ôn tập lần $nextCompleted! Nhận 1 lượt quay! 🎁", Toast.LENGTH_LONG).show()
-                                                            
-                                                            // Close dialog and switch to Lucky Wheel
-                                                            selectedTopicForTimeline = null
-                                                            onNavigateToTab(2)
-                                                        },
-                                                        colors = ButtonDefaults.buttonColors(containerColor = if (isNext) Color(0xFF2E7D32) else Color(0xFF475569)),
-                                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-                                                        modifier = Modifier.defaultMinSize(minWidth = 75.dp, minHeight = 28.dp),
-                                                        shape = RoundedCornerShape(6.dp)
-                                                    ) {
-                                                        Text(
-                                                            text = if (isNext) "Báo đã xong" else "Xong sớm",
-                                                            fontSize = 10.sp,
-                                                            fontWeight = FontWeight.Bold,
-                                                            maxLines = 1
-                                                        )
+                                                            Text(
+                                                                text = if (topic.intervalType == "every_n_hours") {
+                                                                    SimpleDateFormat("HH:mm dd/MM/yyyy", Locale.getDefault()).format(reviewDate)
+                                                                } else {
+                                                                    SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(reviewDate)
+                                                                },
+                                                                fontSize = 11.sp,
+                                                                color = if (isDarkTheme) Color(0xFFCBD5E1) else Color(0xFF64748B)
+                                                            )
+                                                        }
+                                                    }
+                                                    
+                                                    Spacer(modifier = Modifier.width(6.dp))
+                                                    
+                                                    if (isCompleted) {
+                                                        Box(
+                                                            modifier = Modifier
+                                                                .clip(RoundedCornerShape(6.dp))
+                                                                .background(if (isDarkTheme) Color(0xFF064E3B) else Color(0xFFC8E6C9))
+                                                                .padding(horizontal = 8.dp, vertical = 2.dp)
+                                                        ) {
+                                                            Text("Đã ôn", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = if (isDarkTheme) Color(0xFF34D399) else Color(0xFF2E7D32))
+                                                        }
+                                                    } else {
+                                                        Button(
+                                                            onClick = {
+                                                                // Increment reviewsCompleted & log completion history
+                                                                val nextCompleted = index + 1
+                                                                viewModel.updateTopicProgress(topic.id, nextCompleted)
+                                                                viewModel.logCompletedWorkout(
+                                                                    exerciseId = topic.id,
+                                                                    exerciseName = topic.name,
+                                                                    categoryName = "Ôn Tập Lặp Lại",
+                                                                    note = tempNotesList.getOrElse(index) { "" },
+                                                                    rating = 3,
+                                                                    durationSeconds = 600
+                                                                )
+                                                                // Award 1 lucky spin
+                                                                val prefs = context.getSharedPreferences("fitminder_prefs", Context.MODE_PRIVATE)
+                                                                val currentSpins = prefs.getInt("available_spins", 0)
+                                                                prefs.edit().putInt("available_spins", currentSpins + 1).apply()
+                                                                
+                                                                val msg = when (topic.intervalType) {
+                                                                    "every_day", "every_n_days", "every_n_hours" -> "Đã hoàn thành ôn tập ngày hôm nay! Nhận 1 lượt quay! 🎁"
+                                                                    else -> "Đã ghi nhận ôn tập lần $nextCompleted! Nhận 1 lượt quay! 🎁"
+                                                                }
+                                                                Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                                                                
+                                                                // Close dialog and switch to Lucky Wheel
+                                                                selectedTopicForTimeline = null
+                                                                onNavigateToTab(2)
+                                                            },
+                                                            colors = ButtonDefaults.buttonColors(containerColor = if (isNext) Color(0xFF2E7D32) else Color(0xFF475569)),
+                                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                                                            modifier = Modifier.defaultMinSize(minWidth = 75.dp, minHeight = 28.dp),
+                                                            shape = RoundedCornerShape(6.dp)
+                                                        ) {
+                                                            Text(
+                                                                text = if (topic.intervalType == "5_times") {
+                                                                    if (isNext) "Báo đã xong" else "Xong sớm"
+                                                                } else {
+                                                                    "Hoàn thành"
+                                                                },
+                                                                fontSize = 10.sp,
+                                                                fontWeight = FontWeight.Bold,
+                                                                maxLines = 1
+                                                            )
+                                                        }
                                                     }
                                                 }
-                                            }
                                             
                                             Spacer(modifier = Modifier.height(8.dp))
                                             
@@ -2416,7 +2658,8 @@ fun DashboardScreen(
         Dialog(onDismissRequest = { showGeneralTimelineDialog = false }) {
             Card(
                 shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.White),
+                colors = CardDefaults.cardColors(containerColor = if (isDarkTheme) Color(0xFF1E293B) else Color.White),
+                border = BorderStroke(1.dp, if (isDarkTheme) Color(0xFF334155) else Color(0xFFE2E8F0)),
                 modifier = Modifier
                     .fillMaxWidth()
                     .fillMaxHeight(0.85f)
@@ -2431,21 +2674,25 @@ fun DashboardScreen(
                             text = "Timeline Lịch Trình Chung",
                             fontSize = 18.sp,
                             fontWeight = FontWeight.Bold,
-                            color = Color(0xFF1E293B)
+                            color = if (isDarkTheme) Color.White else Color(0xFF1E293B)
                         )
                         IconButton(onClick = { showGeneralTimelineDialog = false }) {
-                            Icon(imageVector = Icons.Default.Close, contentDescription = "Đóng", tint = Color.Gray)
+                            Icon(imageVector = Icons.Default.Close, contentDescription = "Đóng", tint = if (isDarkTheme) Color.White else Color.Gray)
                         }
                     }
                     
-                    Divider(color = Color(0xFFE2E8F0), modifier = Modifier.padding(vertical = 10.dp))
+                    Divider(color = if (isDarkTheme) Color(0xFF334155) else Color(0xFFE2E8F0), modifier = Modifier.padding(vertical = 10.dp))
                     
                     // Group topics by due date
                     val calendarEvents = remember(topics) {
                         val map = mutableMapOf<String, MutableList<Pair<CategoryEntity, Int>>>()
                         topics.forEach { topic ->
-                            val intervals = listOf(topic.interval1, topic.interval2, topic.interval3, topic.interval4, topic.interval5)
-                            intervals.forEachIndexed { index, _ ->
+                            val indices = if (topic.intervalType == "5_times") {
+                                listOf(0, 1, 2, 3, 4)
+                            } else {
+                                listOf(topic.reviewsCompleted)
+                            }
+                            indices.forEach { index ->
                                 val due = calculateReviewDate(topic, index)
                                 val key = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(due)
                                 if (!map.containsKey(key)) {
@@ -2463,7 +2710,7 @@ fun DashboardScreen(
                             modifier = Modifier.weight(1f).fillMaxWidth(),
                             contentAlignment = Alignment.Center
                         ) {
-                            Text("Chưa có mốc lặp nào được tạo", fontSize = 14.sp, color = Color.Gray)
+                            Text("Chưa có mốc lặp nào được tạo", fontSize = 14.sp, color = if (isDarkTheme) Color(0xFF94A3B8) else Color.Gray)
                         }
                     } else {
                         LazyColumn(
@@ -2482,7 +2729,14 @@ fun DashboardScreen(
                                         Box(
                                             modifier = Modifier
                                                 .fillMaxWidth()
-                                                .background(if (isTodayDate) Color(0xFFEEF2FF) else Color(0xFFF1F5F9), RoundedCornerShape(8.dp))
+                                                .background(
+                                                    if (isTodayDate) {
+                                                        if (isDarkTheme) Color(0xFF1E1B4B) else Color(0xFFEEF2FF)
+                                                    } else {
+                                                        if (isDarkTheme) Color(0xFF334155) else Color(0xFFF1F5F9)
+                                                    },
+                                                    RoundedCornerShape(8.dp)
+                                                )
                                                 .padding(vertical = 6.dp, horizontal = 10.dp)
                                         ) {
                                             Row(
@@ -2499,12 +2753,21 @@ fun DashboardScreen(
                                                     text = dateFormatted,
                                                     fontSize = 11.sp,
                                                     fontWeight = FontWeight.Bold,
-                                                    color = if (isTodayDate) Color(0xFF4F46E5) else Color(0xFF1E293B),
+                                                    color = if (isTodayDate) {
+                                                        if (isDarkTheme) Color(0xFF818CF8) else Color(0xFF4F46E5)
+                                                    } else {
+                                                        if (isDarkTheme) Color.White else Color(0xFF1E293B)
+                                                    },
                                                     modifier = Modifier.weight(1f)
                                                 )
                                                 if (isTodayDate) {
                                                     Spacer(modifier = Modifier.width(4.dp))
-                                                    Text("Hôm nay", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFF4F46E5))
+                                                    Text(
+                                                        text = "Hôm nay",
+                                                        fontSize = 10.sp,
+                                                        fontWeight = FontWeight.Bold,
+                                                        color = if (isDarkTheme) Color(0xFF818CF8) else Color(0xFF4F46E5)
+                                                    )
                                                 }
                                             }
                                         }
@@ -2529,15 +2792,26 @@ fun DashboardScreen(
                                                 Text(
                                                     text = topic.name,
                                                     fontSize = 12.sp,
-                                                    color = if (completed) Color.Gray else Color(0xFF0F172A),
+                                                    color = if (completed) {
+                                                        Color.Gray
+                                                    } else {
+                                                        if (isDarkTheme) Color.White else Color(0xFF0F172A)
+                                                    },
                                                     fontWeight = FontWeight.Bold,
                                                     modifier = Modifier.weight(1f)
                                                 )
                                                 Spacer(modifier = Modifier.width(4.dp))
+                                                val suffixLabel = when (topic.intervalType) {
+                                                    "specific_date" -> "Hẹn giờ"
+                                                    "every_day" -> "Ngày ${stepIdx + 1}"
+                                                    "every_n_days" -> "Lần ${stepIdx + 1}"
+                                                    "every_n_hours" -> "Lần ${stepIdx + 1}"
+                                                    else -> "Lần ${stepIdx + 1}"
+                                                }
                                                 Text(
-                                                    text = "Lần ${stepIdx + 1}",
+                                                    text = suffixLabel,
                                                     fontSize = 10.sp,
-                                                    color = Color.Gray,
+                                                    color = if (isDarkTheme) Color(0xFF94A3B8) else Color.Gray,
                                                     fontWeight = FontWeight.SemiBold
                                                 )
                                             }
@@ -2561,8 +2835,8 @@ fun DashboardScreen(
         Dialog(onDismissRequest = { notifSettingsTopic = null }) {
             Card(
                 shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.White),
-                border = BorderStroke(1.5.dp, Color(0xFFE2E8F0)),
+                colors = CardDefaults.cardColors(containerColor = if (isDarkTheme) Color(0xFF1E293B) else Color.White),
+                border = BorderStroke(1.5.dp, if (isDarkTheme) Color(0xFF334155) else Color(0xFFE2E8F0)),
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(16.dp)
@@ -2576,13 +2850,13 @@ fun DashboardScreen(
                         text = "🔔 Ghi Chú Thông Báo",
                         fontSize = 18.sp,
                         fontWeight = FontWeight.ExtraBold,
-                        color = Color(0xFF1E293B)
+                        color = if (isDarkTheme) Color.White else Color(0xFF1E293B)
                     )
                     
                     Text(
                         text = "Nhập ghi chú riêng để tạo động lực hoặc lời nhắc nhỏ khi đến giờ học bài tập này:",
                         fontSize = 13.sp,
-                        color = Color(0xFF64748B),
+                        color = if (isDarkTheme) Color(0xFF94A3B8) else Color(0xFF64748B),
                         textAlign = TextAlign.Center
                     )
                     
@@ -2594,10 +2868,10 @@ fun DashboardScreen(
                         shape = RoundedCornerShape(10.dp),
                         maxLines = 4,
                         colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = Color(0xFF1E293B),
-                            unfocusedTextColor = Color(0xFF1E293B),
+                            focusedTextColor = if (isDarkTheme) Color.White else Color(0xFF1E293B),
+                            unfocusedTextColor = if (isDarkTheme) Color.White else Color(0xFF1E293B),
                             focusedBorderColor = Color(0xFF4F46E5),
-                            unfocusedBorderColor = Color(0xFFCBD5E1)
+                            unfocusedBorderColor = if (isDarkTheme) Color(0xFF475569) else Color(0xFFCBD5E1)
                         )
                     )
                     
@@ -2607,7 +2881,7 @@ fun DashboardScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         TextButton(onClick = { notifSettingsTopic = null }) {
-                            Text("Hủy", color = Color(0xFF64748B), fontWeight = FontWeight.Bold)
+                            Text("Hủy", color = if (isDarkTheme) Color(0xFF94A3B8) else Color(0xFF64748B), fontWeight = FontWeight.Bold)
                         }
                         
                         Spacer(modifier = Modifier.width(8.dp))
@@ -3862,8 +4136,8 @@ fun SyncProfileScreen(
         item {
             Card(
                 shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.White),
-                border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                colors = CardDefaults.cardColors(containerColor = if (isDarkTheme) Color(0xFF1E293B) else Color.White),
+                border = BorderStroke(1.dp, if (isDarkTheme) Color(0xFF334155) else Color(0xFFE2E8F0)),
                 elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
             ) {
                 Column(
@@ -3877,14 +4151,14 @@ fun SyncProfileScreen(
                             modifier = Modifier
                                 .size(70.dp)
                                 .clip(CircleShape)
-                                .background(Color(0xFFE2E8F0)),
+                                .background(if (isDarkTheme) Color(0xFF334155) else Color(0xFFE2E8F0)),
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
                                 text = userName.take(1).uppercase(),
                                 fontSize = 32.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = Color(0xFF4F46E5)
+                                color = if (isDarkTheme) Color(0xFF818CF8) else Color(0xFF4F46E5)
                             )
                         }
                         Spacer(modifier = Modifier.height(12.dp))
@@ -3892,12 +4166,12 @@ fun SyncProfileScreen(
                             text = userName,
                             fontSize = 18.sp,
                             fontWeight = FontWeight.Bold,
-                            color = Color(0xFF0F172A)
+                            color = if (isDarkTheme) Color.White else Color(0xFF0F172A)
                         )
                         Text(
                             text = userEmail,
                             fontSize = 13.sp,
-                            color = Color.Gray
+                            color = if (isDarkTheme) Color(0xFF94A3B8) else Color.Gray
                         )
                         Spacer(modifier = Modifier.height(16.dp))
                         Button(
@@ -3914,13 +4188,13 @@ fun SyncProfileScreen(
                             modifier = Modifier
                                 .size(70.dp)
                                 .clip(CircleShape)
-                                .background(Color(0xFFFFFAF0)),
+                                .background(if (isDarkTheme) Color(0xFF334155) else Color(0xFFFFFAF0)),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
                                 imageVector = Icons.Default.AccountCircle,
                                 contentDescription = "None",
-                                tint = Color(0xFF4F46E5),
+                                tint = if (isDarkTheme) Color(0xFF818CF8) else Color(0xFF4F46E5),
                                 modifier = Modifier.size(54.dp)
                             )
                         }
@@ -3929,12 +4203,12 @@ fun SyncProfileScreen(
                             text = "Học Không Giới Hạn",
                             fontSize = 18.sp,
                             fontWeight = FontWeight.Bold,
-                            color = Color(0xFF0F172A)
+                            color = if (isDarkTheme) Color.White else Color(0xFF0F172A)
                         )
                         Text(
                             text = "Đồng bộ đám mây và lưu trữ tiến độ ôn tập an toàn.",
                             fontSize = 12.sp,
-                            color = Color.Gray,
+                            color = if (isDarkTheme) Color(0xFF94A3B8) else Color.Gray,
                             textAlign = TextAlign.Center,
                             modifier = Modifier.padding(horizontal = 16.dp)
                         )
@@ -3966,8 +4240,8 @@ fun SyncProfileScreen(
         item {
             Card(
                 shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.White),
-                border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                colors = CardDefaults.cardColors(containerColor = if (isDarkTheme) Color(0xFF1E293B) else Color.White),
+                border = BorderStroke(1.dp, if (isDarkTheme) Color(0xFF334155) else Color(0xFFE2E8F0)),
                 elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
             ) {
                 Column(
@@ -3979,7 +4253,7 @@ fun SyncProfileScreen(
                         text = "Đồng Bộ Đám Mây",
                         fontSize = 16.sp,
                         fontWeight = FontWeight.Bold,
-                        color = Color(0xFF0F172A)
+                        color = if (isDarkTheme) Color.White else Color(0xFF0F172A)
                     )
                     Spacer(modifier = Modifier.height(12.dp))
                     
@@ -3991,10 +4265,10 @@ fun SyncProfileScreen(
                         Column {
                             val syncSdf = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault())
                             val lastSyncStr = if (lastSyncTime > 0) syncSdf.format(Date(lastSyncTime)) else "Chưa đồng bộ"
-                            Text("Lần đồng bộ cuối:", fontSize = 12.sp, color = Color.Gray)
-                            Text(lastSyncStr, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF334155))
+                            Text("Lần đồng bộ cuối:", fontSize = 12.sp, color = if (isDarkTheme) Color(0xFF94A3B8) else Color.Gray)
+                            Text(lastSyncStr, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = if (isDarkTheme) Color(0xFFCBD5E1) else Color(0xFF334155))
                             Spacer(modifier = Modifier.height(4.dp))
-                            Text("Bản ghi đã lưu đám mây: $cloudItemsCount", fontSize = 11.sp, color = Color(0xFF4F46E5), fontWeight = FontWeight.SemiBold)
+                            Text("Bản ghi đã lưu đám mây: $cloudItemsCount", fontSize = 11.sp, color = if (isDarkTheme) Color(0xFF818CF8) else Color(0xFF4F46E5), fontWeight = FontWeight.SemiBold)
                         }
                         
                         Button(
@@ -4016,7 +4290,7 @@ fun SyncProfileScreen(
                     }
                     
                     Spacer(modifier = Modifier.height(16.dp))
-                    Divider(color = Color(0xFFF1F5F9))
+                    Divider(color = if (isDarkTheme) Color(0xFF334155) else Color(0xFFF1F5F9))
                     Spacer(modifier = Modifier.height(8.dp))
                     
                     Row(
@@ -4025,8 +4299,8 @@ fun SyncProfileScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column {
-                            Text("Tự động đồng bộ", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1E293B))
-                            Text("Đồng bộ tức thời khi lưu mốc ôn tập", fontSize = 11.sp, color = Color.Gray)
+                            Text("Tự động đồng bộ", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = if (isDarkTheme) Color.White else Color(0xFF1E293B))
+                            Text("Đồng bộ tức thời khi lưu mốc ôn tập", fontSize = 11.sp, color = if (isDarkTheme) Color(0xFF94A3B8) else Color.Gray)
                         }
                         Switch(
                             checked = autoSync,
@@ -4166,6 +4440,209 @@ fun SyncProfileScreen(
                                     Spacer(modifier = Modifier.width(6.dp))
                                     Text("Xóa Ảnh", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                                 }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // System Permissions Card
+        item {
+            Card(
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = if (isDarkTheme) Color(0xFF1E293B) else Color.White
+                ),
+                border = BorderStroke(
+                    1.dp,
+                    if (isDarkTheme) Color(0xFF334155) else Color(0xFFE2E8F0)
+                ),
+                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    Text(
+                        text = "⚙️ Quyền Hệ Thống & Nhắc Nhở",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (isDarkTheme) Color.White else Color(0xFF0F172A)
+                    )
+                    
+                    Divider(color = if (isDarkTheme) Color(0xFF334155) else Color(0xFFF1F5F9))
+                    
+                    // State trackers
+                    var isNotificationGranted by remember {
+                        mutableStateOf(
+                            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                                androidx.core.content.ContextCompat.checkSelfPermission(
+                                    context,
+                                    android.Manifest.permission.POST_NOTIFICATIONS
+                                ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+                            } else {
+                                true
+                            }
+                        )
+                    }
+                    
+                    var isExactAlarmGranted by remember {
+                        mutableStateOf(
+                            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+                                val am = context.getSystemService(Context.ALARM_SERVICE) as? android.app.AlarmManager
+                                am?.canScheduleExactAlarms() ?: true
+                            } else {
+                                true
+                            }
+                        )
+                    }
+                    
+                    // Polling checks on Resume
+                    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+                    DisposableEffect(lifecycleOwner) {
+                        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+                            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                                isNotificationGranted = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                                    androidx.core.content.ContextCompat.checkSelfPermission(
+                                        context,
+                                        android.Manifest.permission.POST_NOTIFICATIONS
+                                    ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+                                } else {
+                                    true
+                                }
+                                isExactAlarmGranted = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+                                    val am = context.getSystemService(Context.ALARM_SERVICE) as? android.app.AlarmManager
+                                    am?.canScheduleExactAlarms() ?: true
+                                } else {
+                                    true
+                                }
+                            }
+                        }
+                        lifecycleOwner.lifecycle.addObserver(observer)
+                        onDispose {
+                            lifecycleOwner.lifecycle.removeObserver(observer)
+                        }
+                    }
+                    
+                    val notificationLauncher = rememberLauncherForActivityResult(
+                        contract = androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
+                    ) { isGranted ->
+                        isNotificationGranted = isGranted
+                        if (isGranted) {
+                            Toast.makeText(context, "Đã cấp quyền thông báo thành công! 🎉", Toast.LENGTH_SHORT).show()
+                        } else {
+                            Toast.makeText(context, "Quyền thông báo bị từ chối.", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                    
+                    // 1. Notification Permission Section
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Quyền hiển thị thông báo",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isDarkTheme) Color.White else Color(0xFF1E293B)
+                            )
+                            
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(if (isNotificationGranted) Color(0xFFE8F5E9) else Color(0xFFFFF3E0))
+                                    .padding(horizontal = 8.dp, vertical = 2.dp)
+                            ) {
+                                Text(
+                                    text = if (isNotificationGranted) "Đã Cấp" else "Chưa Cấp",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (isNotificationGranted) Color(0xFF2E7D32) else Color(0xFFE65100)
+                                )
+                            }
+                        }
+                        
+                        Text(
+                            text = "Cho phép ứng dụng phát ra chuông nhắc nhở và hiển thị thông báo ngoài màn hình khi đến giờ tập.",
+                            fontSize = 11.sp,
+                            color = Color.Gray
+                        )
+                        
+                        if (!isNotificationGranted && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Button(
+                                onClick = { notificationLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS) },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4F46E5)),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text("Cấp Quyền Thông Báo", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                    
+                    Divider(color = if (isDarkTheme) Color(0xFF334155) else Color(0xFFF1F5F9))
+                    
+                    // 2. Exact Alarm Permission Section
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Quyền nhắc nhở chính xác",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isDarkTheme) Color.White else Color(0xFF1E293B)
+                            )
+                            
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(if (isExactAlarmGranted) Color(0xFFE8F5E9) else Color(0xFFFFF3E0))
+                                    .padding(horizontal = 8.dp, vertical = 2.dp)
+                            ) {
+                                Text(
+                                    text = if (isExactAlarmGranted) "Đã Cấp" else "Chưa Cấp",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (isExactAlarmGranted) Color(0xFF2E7D32) else Color(0xFFE65100)
+                                )
+                            }
+                        }
+                        
+                        Text(
+                            text = "Cực kỳ quan trọng! Giúp ứng dụng kích hoạt chuông và hiển thị thông báo đúng giây, ngay cả khi ứng dụng đã bị đóng hoặc điện thoại đang khóa.",
+                            fontSize = 11.sp,
+                            color = Color.Gray
+                        )
+                        
+                        if (!isExactAlarmGranted && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Button(
+                                onClick = {
+                                    try {
+                                        val intent = android.content.Intent(
+                                            android.provider.Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM,
+                                            android.net.Uri.parse("package:${context.packageName}")
+                                        )
+                                        context.startActivity(intent)
+                                    } catch (e: Exception) {
+                                        val intent = android.content.Intent(android.provider.Settings.ACTION_SETTINGS)
+                                        context.startActivity(intent)
+                                    }
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEF4444)),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text("Cấp Quyền Nhắc Nhở Chính Xác", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                             }
                         }
                     }

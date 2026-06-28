@@ -18,5 +18,7 @@ data class CategoryEntity(
     val interval2: Int = 3,
     val interval3: Int = 7,
     val interval4: Int = 15,
-    val interval5: Int = 30
+    val interval5: Int = 30,
+    val intervalType: String = "5_times",
+    val everyNDays: Int = 1
 )

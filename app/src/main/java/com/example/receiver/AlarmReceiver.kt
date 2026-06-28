@@ -51,7 +51,11 @@ class AlarmReceiver : BroadcastReceiver() {
                 CoroutineScope(Dispatchers.IO).launch {
                     val category = dao.getCategoryById(categoryId)
                     if (category != null) {
-                        val nextVal = (category.reviewsCompleted + 1).coerceAtMost(5)
+                        val nextVal = when (category.intervalType) {
+                            "specific_date" -> (category.reviewsCompleted + 1).coerceAtMost(1)
+                            "every_day", "every_n_days", "every_n_hours" -> category.reviewsCompleted + 1
+                            else -> (category.reviewsCompleted + 1).coerceAtMost(5)
+                        }
                         dao.updateCategory(category.copy(reviewsCompleted = nextVal))
                         
                         // Add a workout log

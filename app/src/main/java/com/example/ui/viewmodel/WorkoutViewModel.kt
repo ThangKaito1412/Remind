@@ -275,7 +275,9 @@ class WorkoutViewModel(private val application: Application) : AndroidViewModel(
         int3: Int = 7,
         int4: Int = 15,
         int5: Int = 30,
-        notifNote: String = ""
+        notifNote: String = "",
+        intervalType: String = "5_times",
+        everyNDays: Int = 1
     ) {
         viewModelScope.launch {
             val topic = CategoryEntity(
@@ -289,7 +291,9 @@ class WorkoutViewModel(private val application: Application) : AndroidViewModel(
                 interval2 = int2,
                 interval3 = int3,
                 interval4 = int4,
-                interval5 = int5
+                interval5 = int5,
+                intervalType = intervalType,
+                everyNDays = everyNDays
             )
             val topicId = repository.insertCategory(topic)
             

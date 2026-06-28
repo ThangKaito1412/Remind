@@ -1,0 +1,6 @@
+{
+  "name": "ReviewMind",
+  "description": "Ứng dụng ôn tập lặp lại ngắt quãng thông minh, quản lý các bộ từ vựng, bài học theo chu kỳ 1 ngày, 3 ngày, 1 tuần, hỗ trợ hẹn giờ nhắc nhở và đồng bộ đám mây.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -262,7 +262,8 @@ class WorkoutViewModel(private val application: Application) : AndroidViewModel(
         int2: Int = 3,
         int3: Int = 7,
         int4: Int = 15,
-        int5: Int = 30
+        int5: Int = 30,
+        notifNote: String = ""
     ) {
         viewModelScope.launch {
             val topic = CategoryEntity(
@@ -279,6 +280,11 @@ class WorkoutViewModel(private val application: Application) : AndroidViewModel(
                 interval5 = int5
             )
             val topicId = repository.insertCategory(topic)
+            
+            if (notifNote.isNotEmpty()) {
+                val prefs = application.getSharedPreferences("fitminder_prefs", Context.MODE_PRIVATE)
+                prefs.edit().putString("notif_note_$topicId", notifNote).apply()
+            }
             
             // Auto schedule daily alarms for this topic based on reviewTime!
             try {

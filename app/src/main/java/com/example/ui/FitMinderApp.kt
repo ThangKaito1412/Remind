@@ -1214,6 +1214,7 @@ fun DashboardScreen(
     if (showAddTopicDialog) {
         var topicName by remember { mutableStateOf("") }
         var folderName by remember { mutableStateOf("Mặc định") }
+        var customNotificationNote by remember { mutableStateOf("") }
         var reviewHour by remember { mutableIntStateOf(8) }
         var reviewMinute by remember { mutableIntStateOf(0) }
         var reviewTimeStr by remember { mutableStateOf("08:00") }
@@ -1225,6 +1226,10 @@ fun DashboardScreen(
         var int4 by remember { mutableIntStateOf(15) }
         var int5 by remember { mutableIntStateOf(30) }
         var expandIntervals by remember { mutableStateOf(false) }
+        
+        var intervalType by remember { mutableStateOf("5_times") }
+        var everyNDays by remember { mutableIntStateOf(2) }
+        var specificReminderDate by remember { mutableStateOf(SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())) }
         
         Dialog(onDismissRequest = { showAddTopicDialog = false }) {
             Card(
@@ -1256,6 +1261,22 @@ fun DashboardScreen(
                         modifier = Modifier.fillMaxWidth(),
                         label = { Text("Tên chủ đề từ vựng / bài giảng") },
                         placeholder = { Text("Ví dụ: Từ vựng IELTS Unit 5") },
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = Color(0xFF1E293B),
+                            unfocusedTextColor = Color(0xFF1E293B),
+                            focusedBorderColor = Color(0xFF4F46E5),
+                            unfocusedBorderColor = Color(0xFFCBD5E1)
+                        )
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    OutlinedTextField(
+                        value = customNotificationNote,
+                        onValueChange = { customNotificationNote = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Nội dung ghi chú thông báo (tùy chọn)") },
+                        placeholder = { Text("Ví dụ: Bạn rất giỏi! Hãy học bài nào!") },
+                        maxLines = 3,
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedTextColor = Color(0xFF1E293B),
                             unfocusedTextColor = Color(0xFF1E293B),
@@ -1393,79 +1414,255 @@ fun DashboardScreen(
                     Spacer(modifier = Modifier.height(12.dp))
 
                     // Customizable repetition spacing
-                    Row(
+                    Text(
+                        text = "⚙️ Cài đặt mốc khoảng cách lặp",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF475569)
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    
+                    Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable { expandIntervals = !expandIntervals }
-                            .padding(vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
+                            .border(1.dp, Color(0xFFCBD5E1), RoundedCornerShape(8.dp))
+                            .background(Color(0xFFF8FAFC))
+                            .padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        Text(
-                            text = "⚙️ Cài đặt mốc khoảng cách lặp (lần 1-5)",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFF4F46E5)
-                        )
-                        Icon(
-                            imageVector = if (expandIntervals) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                            contentDescription = "Expand",
-                            tint = Color(0xFF4F46E5),
-                            modifier = Modifier.size(16.dp)
-                        )
+                        // Option 1: 5 lần
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { intervalType = "5_times" },
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(
+                                selected = (intervalType == "5_times"),
+                                onClick = { intervalType = "5_times" },
+                                colors = RadioButtonDefaults.colors(selectedColor = Color(0xFF4F46E5))
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Column {
+                                Text("Ôn tập lặp 5 lần (Mặc định)", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF1E293B))
+                                Text("Khoảng cách tăng dần (1, 3, 7, 15, 30 ngày) hoặc tùy chỉnh", fontSize = 11.sp, color = Color(0xFF64748B))
+                             }
+                        }
+                        
+                        // Option 2: Mỗi ngày
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { intervalType = "every_day" },
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(
+                                selected = (intervalType == "every_day"),
+                                onClick = { intervalType = "every_day" },
+                                colors = RadioButtonDefaults.colors(selectedColor = Color(0xFF4F46E5))
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Column {
+                                Text("Mỗi ngày", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF1E293B))
+                                Text("Ôn tập liên tiếp hàng ngày", fontSize = 11.sp, color = Color(0xFF64748B))
+                            }
+                        }
+
+                        // Option 3: Sau mỗi n ngày
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { intervalType = "every_n_days" },
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(
+                                selected = (intervalType == "every_n_days"),
+                                onClick = { intervalType = "every_n_days" },
+                                colors = RadioButtonDefaults.colors(selectedColor = Color(0xFF4F46E5))
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Column {
+                                Text("Sau mỗi n ngày", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF1E293B))
+                                Text("Lặp lại định kỳ sau mỗi n ngày", fontSize = 11.sp, color = Color(0xFF64748B))
+                            }
+                        }
+                        
+                        if (intervalType == "every_n_days") {
+                            Row(
+                                modifier = Modifier
+                                    .padding(start = 36.dp)
+                                    .fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("Số ngày (n): ", fontSize = 12.sp, color = Color(0xFF475569))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier
+                                        .border(1.dp, Color(0xFFCBD5E1), RoundedCornerShape(4.dp))
+                                        .background(Color.White)
+                                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                                ) {
+                                    Text(
+                                        text = "$everyNDays ngày", 
+                                        fontSize = 12.sp, 
+                                        fontWeight = FontWeight.Bold, 
+                                        color = Color(0xFF1E293B)
+                                    )
+                                    Spacer(modifier = Modifier.width(16.dp))
+                                    Column {
+                                        Icon(
+                                            imageVector = Icons.Default.ArrowDropUp, 
+                                            contentDescription = "Tăng",
+                                            tint = Color(0xFF4F46E5),
+                                            modifier = Modifier
+                                                .size(16.dp)
+                                                .clickable { everyNDays += 1 }
+                                        )
+                                        Icon(
+                                            imageVector = Icons.Default.ArrowDropDown, 
+                                            contentDescription = "Giảm",
+                                            tint = Color(0xFF64748B),
+                                            modifier = Modifier
+                                                .size(16.dp)
+                                                .clickable { if (everyNDays > 1) everyNDays -= 1 }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        // Option 4: Nhắc vào 1 ngày nhất định theo lịch
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { intervalType = "specific_date" },
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(
+                                selected = (intervalType == "specific_date"),
+                                onClick = { intervalType = "specific_date" },
+                                colors = RadioButtonDefaults.colors(selectedColor = Color(0xFF4F46E5))
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Column {
+                                Text("Nhắc vào 1 ngày nhất định theo lịch", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF1E293B))
+                                Text("Chọn chính xác ngày cần nhắc nhở", fontSize = 11.sp, color = Color(0xFF64748B))
+                            }
+                        }
+                        
+                        if (intervalType == "specific_date") {
+                            Row(
+                                modifier = Modifier
+                                    .padding(start = 36.dp)
+                                    .fillMaxWidth()
+                                    .border(1.dp, Color(0xFFCBD5E1), RoundedCornerShape(4.dp))
+                                    .background(Color.White)
+                                    .clickable {
+                                        val calendar = Calendar.getInstance()
+                                        DatePickerDialog(
+                                            context,
+                                            { _, year, month, day ->
+                                                val formattedMonth = String.format("%02d", month + 1)
+                                                val formattedDay = String.format("%02d", day)
+                                                specificReminderDate = "$year-$formattedMonth-$formattedDay"
+                                            },
+                                            calendar.get(Calendar.YEAR),
+                                            calendar.get(Calendar.MONTH),
+                                            calendar.get(Calendar.DAY_OF_MONTH)
+                                        ).show()
+                                    }
+                                    .padding(10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    text = specificReminderDate,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = Color(0xFF1E293B)
+                                )
+                                Icon(imageVector = Icons.Default.CalendarToday, contentDescription = "Chọn ngày", tint = Color(0xFF4F46E5), modifier = Modifier.size(16.dp))
+                            }
+                        }
                     }
                     
-                    if (expandIntervals) {
-                        Spacer(modifier = Modifier.height(4.dp))
+                    if (intervalType == "5_times") {
+                        Spacer(modifier = Modifier.height(10.dp))
                         Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { expandIntervals = !expandIntervals }
+                                .padding(vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            listOf(
-                                IntervalConfig("Lần 1", int1) { int1 = it },
-                                IntervalConfig("Lần 2", int2) { int2 = it },
-                                IntervalConfig("Lần 3", int3) { int3 = it },
-                                IntervalConfig("Lần 4", int4) { int4 = it },
-                                IntervalConfig("Lần 5", int5) { int5 = it }
-                            ).forEach { cfg ->
-                                Column(
-                                    modifier = Modifier.weight(1f),
-                                    horizontalAlignment = Alignment.CenterHorizontally
-                                ) {
-                                    Text(cfg.label, fontSize = 9.sp, fontWeight = FontWeight.Medium, color = Color(0xFF64748B))
-                                    Spacer(modifier = Modifier.height(4.dp))
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        modifier = Modifier
-                                            .border(1.dp, Color(0xFFCBD5E1), RoundedCornerShape(4.dp))
-                                            .background(Color(0xFFF8FAFC))
-                                            .padding(horizontal = 2.dp, vertical = 2.dp)
+                            Text(
+                                text = "✏️ Tùy chỉnh chi tiết khoảng cách (lần 1-5)",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF4F46E5)
+                            )
+                            Icon(
+                                imageVector = if (expandIntervals) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                                contentDescription = "Expand",
+                                tint = Color(0xFF4F46E5),
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                        
+                        if (expandIntervals) {
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                listOf(
+                                    IntervalConfig("Lần 1", int1) { int1 = it },
+                                    IntervalConfig("Lần 2", int2) { int2 = it },
+                                    IntervalConfig("Lần 3", int3) { int3 = it },
+                                    IntervalConfig("Lần 4", int4) { int4 = it },
+                                    IntervalConfig("Lần 5", int5) { int5 = it }
+                                ).forEach { cfg ->
+                                    Column(
+                                        modifier = Modifier.weight(1f),
+                                        horizontalAlignment = Alignment.CenterHorizontally
                                     ) {
-                                        Text(
-                                            text = "${cfg.value} d", 
-                                            fontSize = 9.sp, 
-                                            fontWeight = FontWeight.Bold, 
-                                            color = Color(0xFF1E293B),
-                                            modifier = Modifier.weight(1f),
-                                            textAlign = TextAlign.Center
-                                        )
-                                        Column {
-                                            Icon(
-                                                imageVector = Icons.Default.ArrowDropUp, 
-                                                contentDescription = "Lên",
-                                                tint = Color(0xFF4F46E5),
-                                                modifier = Modifier
-                                                    .size(14.dp)
-                                                    .clickable { cfg.onValueChange(cfg.value + 1) }
+                                        Text(cfg.label, fontSize = 9.sp, fontWeight = FontWeight.Medium, color = Color(0xFF64748B))
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            modifier = Modifier
+                                                .border(1.dp, Color(0xFFCBD5E1), RoundedCornerShape(4.dp))
+                                                .background(Color(0xFFF8FAFC))
+                                                .padding(horizontal = 2.dp, vertical = 2.dp)
+                                        ) {
+                                            Text(
+                                                text = "${cfg.value} d", 
+                                                fontSize = 9.sp, 
+                                                fontWeight = FontWeight.Bold, 
+                                                color = Color(0xFF1E293B),
+                                                modifier = Modifier.weight(1f),
+                                                textAlign = TextAlign.Center
                                             )
-                                            Icon(
-                                                imageVector = Icons.Default.ArrowDropDown, 
-                                                contentDescription = "Xuống",
-                                                tint = Color(0xFF64748B),
-                                                modifier = Modifier
-                                                    .size(14.dp)
-                                                    .clickable { if (cfg.value > 1) cfg.onValueChange(cfg.value - 1) }
-                                            )
+                                            Column {
+                                                Icon(
+                                                    imageVector = Icons.Default.ArrowDropUp, 
+                                                    contentDescription = "Lên",
+                                                    tint = Color(0xFF4F46E5),
+                                                    modifier = Modifier
+                                                        .size(14.dp)
+                                                        .clickable { cfg.onValueChange(cfg.value + 1) }
+                                                )
+                                                Icon(
+                                                    imageVector = Icons.Default.ArrowDropDown, 
+                                                    contentDescription = "Xuống",
+                                                    tint = Color(0xFF64748B),
+                                                    modifier = Modifier
+                                                        .size(14.dp)
+                                                        .clickable { if (cfg.value > 1) cfg.onValueChange(cfg.value - 1) }
+                                                )
+                                            }
                                         }
                                     }
                                 }
@@ -1491,7 +1688,64 @@ fun DashboardScreen(
                                     return@Button
                                 }
                                 val folderStr = if (folderName.trim().isEmpty()) "Mặc định" else folderName.trim()
-                                viewModel.addTopic(topicName.trim(), studyDateString, folderStr, reviewTimeStr, int1, int2, int3, int4, int5)
+                                
+                                val finalInt1: Int
+                                val finalInt2: Int
+                                val finalInt3: Int
+                                val finalInt4: Int
+                                val finalInt5: Int
+                                
+                                when (intervalType) {
+                                    "every_day" -> {
+                                        finalInt1 = 1
+                                        finalInt2 = 2
+                                        finalInt3 = 3
+                                        finalInt4 = 4
+                                        finalInt5 = 5
+                                    }
+                                    "every_n_days" -> {
+                                        val n = everyNDays
+                                        finalInt1 = n
+                                        finalInt2 = 2 * n
+                                        finalInt3 = 3 * n
+                                        finalInt4 = 4 * n
+                                        finalInt5 = 5 * n
+                                    }
+                                    "specific_date" -> {
+                                        val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+                                        val start = try { sdf.parse(studyDateString) ?: Date() } catch(e: Exception) { Date() }
+                                        val target = try { sdf.parse(specificReminderDate) ?: Date() } catch(e: Exception) { Date() }
+                                        val diff = target.time - start.time
+                                        val diffDays = (diff / (1000 * 60 * 60 * 24)).toInt()
+                                        val finalD = if (diffDays > 0) diffDays else 1
+                                        
+                                        finalInt1 = finalD
+                                        finalInt2 = finalD
+                                        finalInt3 = finalD
+                                        finalInt4 = finalD
+                                        finalInt5 = finalD
+                                    }
+                                    else -> { // "5_times"
+                                        finalInt1 = int1
+                                        finalInt2 = int2
+                                        finalInt3 = int3
+                                        finalInt4 = int4
+                                        finalInt5 = int5
+                                    }
+                                }
+                                
+                                viewModel.addTopic(
+                                    topicName.trim(), 
+                                    studyDateString, 
+                                    folderStr, 
+                                    reviewTimeStr, 
+                                    finalInt1, 
+                                    finalInt2, 
+                                    finalInt3, 
+                                    finalInt4, 
+                                    finalInt5,
+                                    customNotificationNote.trim()
+                                )
                                 showAddTopicDialog = false
                                 Toast.makeText(context, "Thêm chủ đề lặp thành công!", Toast.LENGTH_SHORT).show()
                             },

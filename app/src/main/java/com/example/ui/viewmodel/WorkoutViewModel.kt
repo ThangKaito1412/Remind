@@ -216,6 +216,13 @@ class WorkoutViewModel(private val application: Application) : AndroidViewModel(
 
     fun logout() {
         viewModelScope.launch {
+            try {
+                schedules.value.forEach { schedule ->
+                    AlarmScheduler.cancelWorkoutAlarm(application, schedule)
+                }
+            } catch (e: Exception) {
+                // Ignore schedule cancel errors
+            }
             repository.logoutUser()
             repository.clearAllLocalData() // ALWAYS clear local database completely on sign-out
             updateLoginState()
@@ -416,6 +423,14 @@ class WorkoutViewModel(private val application: Application) : AndroidViewModel(
 
     fun deleteCategory(category: CategoryEntity) {
         viewModelScope.launch {
+            try {
+                val relatedSchedules = schedules.value.filter { it.categoryId == category.id }
+                relatedSchedules.forEach { schedule ->
+                    AlarmScheduler.cancelWorkoutAlarm(application, schedule)
+                }
+            } catch (e: Exception) {
+                // Ignore schedule cancel errors
+            }
             repository.deleteCategory(category)
             triggerAutoSyncIfEnabled()
         }

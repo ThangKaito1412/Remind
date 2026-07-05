@@ -91,27 +91,45 @@ class AlarmReceiver : BroadcastReceiver() {
         }
         
         val scheduleId = intent.getLongExtra("SCHEDULE_ID", -1L)
-        if (scheduleId != -1L) {
-            val database = WorkoutDatabase.getDatabase(context)
-            val dao = database.workoutDao()
-            CoroutineScope(Dispatchers.IO).launch {
-                try {
-                    val schedule = dao.getScheduleById(scheduleId)
-                    if (schedule != null && schedule.isActive) {
-                        AlarmScheduler.scheduleWorkoutAlarm(context, schedule)
-                        Log.d("AlarmReceiver", "Rescheduled active alarm for ${schedule.categoryName} (ID: ${schedule.id}) for tomorrow.")
+        val database = WorkoutDatabase.getDatabase(context)
+        val dao = database.workoutDao()
+        
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                // 1. If categoryId is present, verify that the category still exists in the database
+                if (categoryId != -1L) {
+                    val category = dao.getCategoryById(categoryId)
+                    if (category == null) {
+                        Log.d("AlarmReceiver", "Category ID $categoryId was deleted. Ignoring alarm and skipping notification.")
+                        return@launch
                     }
-                } catch (e: Exception) {
-                    Log.e("AlarmReceiver", "Failed to reschedule alarm ID $scheduleId", e)
                 }
+                
+                // 2. If scheduleId is present and is not a snooze alarm (snooze schedule IDs are categoryId + 100000)
+                if (scheduleId != -1L && scheduleId < 100000) {
+                    val schedule = dao.getScheduleById(scheduleId)
+                    if (schedule == null || !schedule.isActive) {
+                        Log.d("AlarmReceiver", "Schedule ID $scheduleId is null or inactive. Skipping alarm/notification.")
+                        return@launch
+                    } else {
+                        // Reschedule for next time
+                        AlarmScheduler.scheduleWorkoutAlarm(context, schedule)
+                        Log.d("AlarmReceiver", "Rescheduled active alarm for ${schedule.categoryName} (ID: ${schedule.id}).")
+                    }
+                }
+                
+                // 3. Show notification
+                withContext(Dispatchers.Main) {
+                    try {
+                        val notificationHelper = NotificationHelper(context)
+                        notificationHelper.showWorkoutReminder(categoryName, scheduleLabel, categoryId)
+                    } catch (e: Exception) {
+                        Log.e("AlarmReceiver", "Failed to trigger notification", e)
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("AlarmReceiver", "Error processing alarm", e)
             }
-        }
-
-        try {
-            val notificationHelper = NotificationHelper(context)
-            notificationHelper.showWorkoutReminder(categoryName, scheduleLabel, categoryId)
-        } catch (e: Exception) {
-            Log.e("AlarmReceiver", "Failed to trigger notification", e)
         }
     }
 }

@@ -26,6 +26,16 @@ jobs:
       with:
         gradle-version: '9.3.1'
 
+    - name: Set up Android SDK & Accept Licenses
+      run: |
+        echo "Accepting Android SDK licenses..."
+        mkdir -p "$ANDROID_HOME/licenses" || true
+        echo -e "\n24333f8a63b6825ea9c5514f83c2829b004d1fee\nd56f5187479451eabf01fb78af6dfcb131a6481e" >> "$ANDROID_HOME/licenses/android-sdk-license"
+        echo -e "\n84831b9409646a918e30573bab4c9c91346d8abd" >> "$ANDROID_HOME/licenses/android-sdk-preview-license"
+        yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses 2>/dev/null || true
+        echo "Installing Android 36 SDK platforms..."
+        $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platforms;android-36" "platforms;android-36.1" "build-tools;36.0.0" 2>/dev/null || true
+
     - name: Setup Environment and Keystore
       run: |
         # Setup .env for Secrets Gradle Plugin
@@ -34,17 +44,20 @@ jobs:
         elif [ ! -f .env ]; then
           touch .env
         fi
+        cp .env app/.env 2>/dev/null || true
 
         # Restore original debug keystore so app updates don't conflict with existing installs
         if [ -f debug.keystore.base64 ]; then
           base64 -d debug.keystore.base64 > debug.keystore
-          echo "Restored original debug.keystore"
-        elif [ ! -f debug.keystore ]; then
-          keytool -genkey -v -keystore debug.keystore -alias androiddebugkey -storepass android -keypass android -keyalg RSA -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+          echo "Restored original debug.keystore from base64"
         fi
+        if [ ! -f debug.keystore ]; then
+          keytool -genkeypair -v -keystore debug.keystore -alias androiddebugkey -storepass android -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US" -noprompt
+        fi
+        cp debug.keystore app/debug.keystore 2>/dev/null || true
 
     - name: Build Debug APK
-      run: gradle assembleDebug --stacktrace
+      run: gradle assembleDebug --stacktrace --no-daemon
 
     - name: Upload APK
       uses: actions/upload-artifact@v4

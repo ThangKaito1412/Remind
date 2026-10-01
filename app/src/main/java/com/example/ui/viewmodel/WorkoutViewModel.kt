@@ -84,9 +84,24 @@ class WorkoutViewModel(private val application: Application) : AndroidViewModel(
             // Proactively verify and reschedule all active alarms on app startup
             try {
                 val list = repository.getAllSchedulesList()
+                val allCategories = repository.getAllCategoriesList().associateBy { it.id }
                 for (schedule in list) {
+                    val category = allCategories[schedule.categoryId]
+                    val isCompleted = if (category != null) {
+                        when (category.intervalType) {
+                            "specific_date" -> category.reviewsCompleted >= 1
+                            "every_day", "every_n_days", "every_n_hours" -> false
+                            else -> category.reviewsCompleted >= 5
+                        }
+                    } else false
+
                     if (schedule.isActive) {
-                        AlarmScheduler.scheduleWorkoutAlarm(application, schedule)
+                        if (isCompleted) {
+                            AlarmScheduler.cancelWorkoutAlarm(application, schedule)
+                            repository.updateSchedule(schedule.copy(isActive = false))
+                        } else {
+                            AlarmScheduler.scheduleWorkoutAlarm(application, schedule)
+                        }
                     }
                 }
             } catch (e: Exception) {
@@ -442,6 +457,20 @@ class WorkoutViewModel(private val application: Application) : AndroidViewModel(
             if (topic != null) {
                 val updated = topic.copy(reviewsCompleted = completedCount)
                 repository.updateCategory(updated)
+
+                val isCompleted = when (updated.intervalType) {
+                    "specific_date" -> updated.reviewsCompleted >= 1
+                    "every_day", "every_n_days", "every_n_hours" -> false
+                    else -> updated.reviewsCompleted >= 5
+                }
+                if (isCompleted) {
+                    val allSchedules = repository.getAllSchedulesList()
+                    val topicSchedules = allSchedules.filter { it.categoryId == topicId && it.isActive }
+                    for (sched in topicSchedules) {
+                        AlarmScheduler.cancelWorkoutAlarm(application, sched)
+                        repository.updateSchedule(sched.copy(isActive = false))
+                    }
+                }
                 triggerAutoSyncIfEnabled()
             }
         }

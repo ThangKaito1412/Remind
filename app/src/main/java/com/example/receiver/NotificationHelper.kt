@@ -72,19 +72,21 @@ class NotificationHelper(private val context: Context) {
             PendingIntent.FLAG_UPDATE_CURRENT or (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0)
         )
 
-        // Action 2: Go to Workout
-        val goIntent = Intent(context, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
-            putExtra("NAVIGATE_TO_TOPIC_ID", categoryId)
+        // Action 2: Snooze 30 minutes directly
+        val snooze30Intent = Intent(context, AlarmReceiver::class.java).apply {
+            action = "com.example.ACTION_SNOOZE_30"
+            putExtra("CATEGORY_ID", categoryId)
+            putExtra("CATEGORY_NAME", categoryName)
+            putExtra("SCHEDULE_LABEL", label)
         }
-        val goPendingIntent = PendingIntent.getActivity(
+        val snooze30PendingIntent = PendingIntent.getBroadcast(
             context,
             categoryId.toInt() + 20000,
-            goIntent,
+            snooze30Intent,
             PendingIntent.FLAG_UPDATE_CURRENT or (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0)
         )
 
-        // Action 3: Snooze Workout
+        // Action 3: Snooze Workout (open app with snooze dialog)
         val snoozeIntent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
             putExtra("SNOOZE_CATEGORY_ID", categoryId)
@@ -95,6 +97,18 @@ class NotificationHelper(private val context: Context) {
             context,
             categoryId.toInt() + 30000,
             snoozeIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0)
+        )
+
+        // Tapping the notification body opens the app
+        val goIntent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+            putExtra("NAVIGATE_TO_TOPIC_ID", categoryId)
+        }
+        val goPendingIntent = PendingIntent.getActivity(
+            context,
+            categoryId.toInt() + 40000,
+            goIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0)
         )
 
@@ -109,8 +123,8 @@ class NotificationHelper(private val context: Context) {
             .setCategory(NotificationCompat.CATEGORY_ALARM)
             .setDefaults(NotificationCompat.DEFAULT_ALL)
             .addAction(android.R.drawable.ic_menu_save, "Đã hoàn thành", completePendingIntent)
-            .addAction(android.R.drawable.ic_menu_send, "Luyện tập", goPendingIntent)
-            .addAction(android.R.drawable.ic_lock_idle_alarm, "Nhắc sau", snoozePendingIntent)
+            .addAction(android.R.drawable.ic_lock_idle_alarm, "Nhắc sau 30p", snooze30PendingIntent)
+            .addAction(android.R.drawable.ic_menu_recent_history, "Nhắc sau", snoozePendingIntent)
 
         val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         notificationManager.notify(categoryName.hashCode() + label.hashCode(), builder.build())

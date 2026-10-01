@@ -334,12 +334,11 @@ fun FitMinderApp(
     val context = LocalContext.current
     val activity = context as? androidx.activity.ComponentActivity
     
-    // Check if background notification marked something complete and requested to open Lucky Wheel
+    // Check if background notification marked something complete
     LaunchedEffect(Unit) {
         val prefs = context.getSharedPreferences("fitminder_prefs", Context.MODE_PRIVATE)
         if (prefs.getBoolean("trigger_lucky_wheel_on_open", false)) {
             prefs.edit().putBoolean("trigger_lucky_wheel_on_open", false).apply()
-            currentTab = 2 // Switch to Lucky Wheel tab!
         }
     }
     
@@ -657,8 +656,8 @@ fun DashboardScreen(
     var editingTopic by remember { mutableStateOf<CategoryEntity?>(null) }
     var notifSettingsTopic by remember { mutableStateOf<CategoryEntity?>(null) }
     
-    // Filter index: 0 = Tất cả, 1 = Cần ôn hôm nay, 2 = Sắp tới, 3 = Đã hoàn thành
-    var currentFilterIndex by remember { mutableStateOf(0) }
+    // Filter index: 0 = Tất cả, 1 = Cần ôn hôm nay, 2 = Sắp tới, 3 = Đã hoàn thành (Mặc định là 1: Cần ôn hôm nay)
+    var currentFilterIndex by remember { mutableStateOf(1) }
     
     // Calculate study streak days from logs
     val streakDays = remember(logs) {
@@ -935,9 +934,6 @@ fun DashboardScreen(
                                     prefs.edit().putInt("available_spins", currentSpins + 1).apply()
                                     
                                     Toast.makeText(context, "Đã ghi nhận ôn tập cho '${nextReviewTopic.name}'! Nhận 1 lượt quay! 🎁", Toast.LENGTH_LONG).show()
-                                    
-                                    // Navigate to Lucky Wheel tab (tab index 2)
-                                    onNavigateToTab(2)
                                 },
                                 shape = RoundedCornerShape(8.dp),
                                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981)),
@@ -2569,9 +2565,8 @@ fun DashboardScreen(
                                                                 }
                                                                 Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
                                                                 
-                                                                // Close dialog and switch to Lucky Wheel
+                                                                // Close dialog without auto switching tabs
                                                                 selectedTopicForTimeline = null
-                                                                onNavigateToTab(2)
                                                             },
                                                             colors = ButtonDefaults.buttonColors(containerColor = if (isNext) Color(0xFF2E7D32) else Color(0xFF475569)),
                                                             contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),

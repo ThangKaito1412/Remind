@@ -26,11 +26,25 @@ class AlarmReceiver : BroadcastReceiver() {
             val dao = database.workoutDao()
             CoroutineScope(Dispatchers.IO).launch {
                 try {
+                    val allCategories = dao.getAllCategoriesList().associateBy { it.id }
                     val activeSchedules = dao.getAllSchedulesList().filter { it.isActive }
                     for (schedule in activeSchedules) {
-                        AlarmScheduler.scheduleWorkoutAlarm(context, schedule)
+                        val category = allCategories[schedule.categoryId]
+                        val isCompleted = if (category != null) {
+                            when (category.intervalType) {
+                                "specific_date" -> category.reviewsCompleted >= 1
+                                "every_day", "every_n_days", "every_n_hours" -> false
+                                else -> category.reviewsCompleted >= 5
+                            }
+                        } else false
+                        
+                        if (!isCompleted) {
+                            AlarmScheduler.scheduleWorkoutAlarm(context, schedule)
+                        } else {
+                            Log.d("AlarmReceiver", "Skipping boot alarm for completed category ${schedule.categoryName}")
+                        }
                     }
-                    Log.d("AlarmReceiver", "Rescheduled ${activeSchedules.size} alarms successfully after boot.")
+                    Log.d("AlarmReceiver", "Rescheduled active alarms successfully after boot.")
                 } catch (e: Exception) {
                     Log.e("AlarmReceiver", "Error rescheduling alarms on boot", e)
                 }
@@ -44,6 +58,24 @@ class AlarmReceiver : BroadcastReceiver() {
         
         Log.d("AlarmReceiver", "Alarm received for action=$action, $categoryName - $scheduleLabel (ID: $categoryId)")
         
+        if (action == "com.example.ACTION_SNOOZE_30") {
+            // Dismiss notification immediately
+            val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+            notificationManager.cancel(categoryName.hashCode() + scheduleLabel.hashCode())
+            
+            if (categoryId != -1L) {
+                AlarmScheduler.scheduleSnoozeAlarm(
+                    context = context,
+                    categoryId = categoryId,
+                    categoryName = categoryName,
+                    label = scheduleLabel,
+                    minutesFromNow = 30
+                )
+                Toast.makeText(context, "Đã hẹn nhắc lại bài tập '$categoryName' sau 30 phút! ⏰", Toast.LENGTH_LONG).show()
+            }
+            return
+        }
+
         if (action == "com.example.ACTION_COMPLETE") {
             if (categoryId != -1L) {
                 val database = WorkoutDatabase.getDatabase(context)
@@ -58,6 +90,19 @@ class AlarmReceiver : BroadcastReceiver() {
                         }
                         dao.updateCategory(category.copy(reviewsCompleted = nextVal))
                         
+                        val isCompleted = when (category.intervalType) {
+                            "specific_date" -> nextVal >= 1
+                            "every_day", "every_n_days", "every_n_hours" -> false
+                            else -> nextVal >= 5
+                        }
+                        if (isCompleted) {
+                            val categorySchedules = dao.getAllSchedulesList().filter { it.categoryId == category.id }
+                            for (sched in categorySchedules) {
+                                AlarmScheduler.cancelWorkoutAlarm(context, sched)
+                                dao.updateSchedule(sched.copy(isActive = false))
+                            }
+                        }
+                        
                         // Add a workout log
                         dao.insertLog(WorkoutLogEntity(
                             exerciseId = category.id,
@@ -69,12 +114,11 @@ class AlarmReceiver : BroadcastReceiver() {
                             durationSeconds = 600
                         ))
                         
-                        // Add 1 lucky spin!
+                        // Add 1 lucky spin without auto-switching to lucky wheel
                         val sharedPrefs = context.getSharedPreferences("fitminder_prefs", Context.MODE_PRIVATE)
                         val currentSpins = sharedPrefs.getInt("available_spins", 0)
                         sharedPrefs.edit()
                             .putInt("available_spins", currentSpins + 1)
-                            .putBoolean("trigger_lucky_wheel_on_open", true)
                             .apply()
                         
                         // Dismiss notification
@@ -82,7 +126,12 @@ class AlarmReceiver : BroadcastReceiver() {
                         notificationManager.cancel(categoryName.hashCode() + scheduleLabel.hashCode())
                         
                         withContext(Dispatchers.Main) {
-                            Toast.makeText(context, "Đã ghi nhận hoàn thành '${category.name}'! Mở ứng dụng để quay số nhận thưởng! 🎁", Toast.LENGTH_LONG).show()
+                            val msg = if (isCompleted) {
+                                "Chúc mừng! Bạn đã hoàn thành toàn bộ 5 lần ôn tập cho '${category.name}'! 🎉"
+                            } else {
+                                "Đã ghi nhận hoàn thành '${category.name}'! Nhận 1 lượt quay! 🎁"
+                            }
+                            Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
                         }
                     }
                 }
@@ -96,11 +145,27 @@ class AlarmReceiver : BroadcastReceiver() {
         
         CoroutineScope(Dispatchers.IO).launch {
             try {
-                // 1. If categoryId is present, verify that the category still exists in the database
+                // 1. If categoryId is present, verify that the category exists and is not completed
                 if (categoryId != -1L) {
                     val category = dao.getCategoryById(categoryId)
                     if (category == null) {
                         Log.d("AlarmReceiver", "Category ID $categoryId was deleted. Ignoring alarm and skipping notification.")
+                        return@launch
+                    }
+                    val isCompleted = when (category.intervalType) {
+                        "specific_date" -> category.reviewsCompleted >= 1
+                        "every_day", "every_n_days", "every_n_hours" -> false
+                        else -> category.reviewsCompleted >= 5
+                    }
+                    if (isCompleted) {
+                        Log.d("AlarmReceiver", "Category '${category.name}' has completed 5/5 reviews. Skipping notification and disabling alarm.")
+                        if (scheduleId != -1L && scheduleId < 100000) {
+                            val schedule = dao.getScheduleById(scheduleId)
+                            if (schedule != null) {
+                                AlarmScheduler.cancelWorkoutAlarm(context, schedule)
+                                dao.updateSchedule(schedule.copy(isActive = false))
+                            }
+                        }
                         return@launch
                     }
                 }

@@ -45,6 +45,9 @@ class WorkoutRepository(
     }
 
     // --- Category DB Operations ---
+    suspend fun getAllCategoriesList(): List<CategoryEntity> = withContext(Dispatchers.IO) {
+        workoutDao.getAllCategoriesList()
+    }
     suspend fun insertCategory(category: CategoryEntity): Long = withContext(Dispatchers.IO) {
         workoutDao.insertCategory(category)
     }
